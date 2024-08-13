@@ -188,14 +188,14 @@ class SerialDataSaver(QWidget):
         base_dpi = 96  # Matplotlib에서 기본적으로 사용되는 DPI
         scale_factor = qt_dpi / base_dpi
 
-        base_font_size_px = int(14 * scale_factor)
+        base_font_size_px = int(min(screen_width, screen_height) * 0.02 * scale_factor)
 
         plt.rcParams['figure.dpi'] = qt_dpi  # Matplotlib의 DPI를 PyQt의 DPI에 맞춥니다.
-        plt.rcParams['font.size'] = 10
-        plt.rcParams['axes.labelsize'] = 10
-        plt.rcParams['xtick.labelsize'] = 8
-        plt.rcParams['ytick.labelsize'] = 8
-        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['font.size'] = base_font_size_px
+        plt.rcParams['axes.labelsize'] = base_font_size_px
+        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.8)
+        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.8)
+        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.8)
 
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
