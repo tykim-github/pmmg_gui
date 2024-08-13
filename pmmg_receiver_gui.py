@@ -185,17 +185,23 @@ class SerialDataSaver(QWidget):
         screen = QApplication.primaryScreen()
         qt_dpi = screen.physicalDotsPerInch()
 
-        base_dpi = 96  # Matplotlib에서 기본적으로 사용되는 DPI
-        scale_factor = qt_dpi / base_dpi
+        # 모니터의 물리적 크기 (인치 단위)
+        diagonal_in_inches = (monitor.width_mm**2 + monitor.height_mm**2)**0.5 / 25.4
 
-        base_font_size_px = int(min(screen_width, screen_height) * 0.02 * scale_factor)
+        # 모니터의 가로세로 비율에 따라 기본 폰트 크기를 계산
+        base_font_size_inch = diagonal_in_inches * 0.01  # 대략적인 폰트 크기 비율
+        base_font_size_px = int(base_font_size_inch * qt_dpi)  # DPI를 곱하여 픽셀 단위로 변환
 
+        # Matplotlib 설정
         plt.rcParams['figure.dpi'] = qt_dpi  # Matplotlib의 DPI를 PyQt의 DPI에 맞춥니다.
-        plt.rcParams['font.size'] = base_font_size_px
-        plt.rcParams['axes.labelsize'] = base_font_size_px
-        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.8)
-        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.8)
-        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.8)
+        
+        # Adjust the scale factor inversely for Matplotlib fonts based on DPI
+        scale_factor = 96 / qt_dpi
+        plt.rcParams['font.size'] = base_font_size_px * scale_factor  # 계산된 픽셀 크기를 직접 설정
+        plt.rcParams['axes.labelsize'] = base_font_size_px * scale_factor
+        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.8 * scale_factor)
+        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.8 * scale_factor)
+        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.8 * scale_factor)
 
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
