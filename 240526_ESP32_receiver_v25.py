@@ -8,7 +8,6 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import serial.tools.list_ports
 import numpy.linalg as LA
 
-# test
 class SerialReader(QThread):
     data_processed = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)  # 시간, 쿼터니언, 압력 데이터를 전달할 시그널
     line_read = pyqtSignal(str)  # 읽은 줄을 전달할 시그널
