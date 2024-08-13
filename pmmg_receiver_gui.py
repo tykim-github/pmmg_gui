@@ -186,7 +186,7 @@ class SerialDataSaver(QWidget):
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
         layout = QVBoxLayout()
-        base_font_size = int(min(screen_width, screen_height) * 0.015)  # 해상도의 1.5%를 폰트 크기로 설정
+        base_font_size = int(min(screen_width, screen_height) * 0.02)  # 해상도의 1.5%를 폰트 크기로 설정
         self.fig = plt.figure(figsize=(15, 15))  # Figure 생성
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
@@ -198,16 +198,16 @@ class SerialDataSaver(QWidget):
 
         self.status_label = QLabel("Status: None")  # 초기 상태 메시지
         self.status_label.setAlignment(Qt.AlignCenter)  # 텍스트 가운데 정렬
-        self.status_label.setStyleSheet(f"font-size: {base_font_size}pt; font-weight: bold;")  # 글씨 키우고 bold 처리
+        self.status_label.setStyleSheet(f"font-size: {int(base_font_size*1.2)}px; font-weight: bold;")  # 글씨 키우고 bold 처리
         layout.addWidget(self.status_label)  
 
         self.initial_angles_label = QLabel("Initial Angles: Not calculated")
         self.initial_angles_label.setAlignment(Qt.AlignCenter)
-        self.initial_angles_label.setStyleSheet(f"font-size: {base_font_size * 0.8}pt; font-weight: bold;")
+        self.initial_angles_label.setStyleSheet(f"font-size: {base_font_size}px; font-weight: bold;")
         layout.addWidget(self.initial_angles_label)
 
         instruction_label = QLabel("Enter the output trial name:")
-        instruction_label.setStyleSheet(f"font-size: {base_font_size * 0.8}pt;")
+        instruction_label.setStyleSheet(f"font-size: {base_font_size}px;")
         layout.addWidget(instruction_label)
 
         self.filename_input = QLineEdit(self)
@@ -215,12 +215,12 @@ class SerialDataSaver(QWidget):
 
         buttons_layout = QHBoxLayout()
         self.start_btn = QPushButton('START', self)
-        self.start_btn.setStyleSheet(f"font-size: {base_font_size * 0.8}pt;")
+        self.start_btn.setStyleSheet(f"font-size: {base_font_size}px;")
         self.start_btn.clicked.connect(self.start_reading)
         buttons_layout.addWidget(self.start_btn)
 
         end_btn = QPushButton('END', self)
-        end_btn.setStyleSheet(f"font-size: {base_font_size * 0.8}pt;")
+        end_btn.setStyleSheet(f"font-size: {base_font_size}px;")
         end_btn.clicked.connect(self.close_app)
         buttons_layout.addWidget(end_btn)
 
