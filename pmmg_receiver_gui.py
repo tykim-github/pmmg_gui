@@ -186,7 +186,7 @@ class SerialDataSaver(QWidget):
         self.setGeometry(screen_width * 0.15, screen_height * 0.1, screen_width * 0.7, screen_height * 0.8)
 
         layout = QVBoxLayout()
-        base_font_size = int(min(screen_width, screen_height) * 0.015)  # 해상도의 1.5%를 폰트 크기로 설정
+        base_font_size = int(min(screen_width, screen_height) * 0.02)  # 해상도의 1.5%를 폰트 크기로 설정
         self.fig = plt.figure(figsize=(15, 15))  # Figure 생성
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
