@@ -133,7 +133,7 @@ class SerialReader(QThread):
         self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
     # 쿼터니언 곱셈 함수
-    def q_mult(q1, q2):
+    def q_mult(self, q1, q2):
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
         w = w1*w2 - x1*x2 - y1*y2 - z1*z2
@@ -143,12 +143,12 @@ class SerialReader(QThread):
         return np.array([w, x, y, z])
 
     # 쿼터니언 켤레 함수
-    def q_conj(q):
+    def q_conj(self, q):
         w, x, y, z = q
         return np.array([w, -x, -y, -z])
 
     # 회전 각도를 계산하는 함수
-    def q_angle(q):
+    def q_angle(self, q):
         w = q[0]
         return 2 * np.arccos(w)
 
