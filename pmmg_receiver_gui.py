@@ -189,7 +189,7 @@ class SerialDataSaver(QWidget):
         diagonal_in_inches = (monitor.width_mm**2 + monitor.height_mm**2)**0.5 / 25.4
 
         # 모니터의 가로세로 비율에 따라 기본 폰트 크기를 계산
-        base_font_size_inch = diagonal_in_inches * 0.01  # 대략적인 폰트 크기 비율
+        base_font_size_inch = diagonal_in_inches * 0.009  # 대략적인 폰트 크기 비율
         base_font_size_px = int(base_font_size_inch * qt_dpi)  # DPI를 곱하여 픽셀 단위로 변환
 
         # Matplotlib 설정
@@ -231,16 +231,17 @@ class SerialDataSaver(QWidget):
         layout.addWidget(instruction_label)
 
         self.filename_input = QLineEdit(self)
+        self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
         layout.addWidget(self.filename_input)
 
         buttons_layout = QHBoxLayout()
         self.start_btn = QPushButton('START', self)
-        self.start_btn.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        self.start_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
         self.start_btn.clicked.connect(self.start_reading)
         buttons_layout.addWidget(self.start_btn)
 
         end_btn = QPushButton('END', self)
-        end_btn.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        end_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
         end_btn.clicked.connect(self.close_app)
         buttons_layout.addWidget(end_btn)
 
