@@ -134,6 +134,8 @@ class SerialReader(QThread):
 
     # 쿼터니언 곱셈 함수
     def q_mult(self, q1, q2):
+        q1 = q1 / np.linalg.norm(q1)  # 쿼터니언 정규화
+        q2 = q2 / np.linalg.norm(q2)  # 쿼터니언 정규화
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
         w = w1*w2 - x1*x2 - y1*y2 - z1*z2
