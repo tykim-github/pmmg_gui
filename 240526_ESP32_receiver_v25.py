@@ -83,15 +83,15 @@ class SerialReader(QThread):
         avg_quaternions = np.mean(Quaternions, axis=0)
 
         # IMU1, IMU2, IMU3의 평균 쿼터니언
-        q1_avg = avg_quaternions[:4]
-        q2_avg = avg_quaternions[4:8]
-        q3_avg = avg_quaternions[8:12]
+        self.q_ti = avg_quaternions[:4]
+        self.q_si = avg_quaternions[4:8]
+        self.q_fi = avg_quaternions[8:12]
 
         # 무릎과 발목의 초기 각도 계산
-        self.initial_knee_angle = self.calculate_angle(q1_avg, q2_avg)
-        self.initial_ankle_angle = self.calculate_angle(q2_avg, q3_avg)
+        self.initial_knee_angle = self.calculate_angle(self.q_ti, self.q_si)
+        self.initial_ankle_angle = self.calculate_angle(self.q_si, self.q_fi)
 
-        self.initial_quaternions = (q1_avg, q2_avg, q3_avg)
+        self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
 
         # 초기 각도를 로그로 출력 또는 시그널로 전달
         print(f"Initial Knee Angle: {self.initial_knee_angle} degrees")
@@ -104,20 +104,54 @@ class SerialReader(QThread):
         data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
         Time = data[:, 1]
         Quaternions = data[:, 2:14]
+        q_thigh = data[:, 2:6]
+        q_shank = data[:, 6:10]
+        q_foot  = data[:, 10:14]
         Pressure = data[:, 14]
+
+        q_k = np.array([self.q_mult(self.q_mult(q_shank[i], self.q_conj(q_si)),
+                       self.q_mult(self.q_ti, self.q_conj(q_thigh[i])))
+                    for i in range(len(data))])
+
+        q_a = np.array([self.q_mult(self.q_mult(q_foot[i], self.q_conj(q_fi)),
+                       self.q_mult(self.q_si, self.q_conj(q_shank[i])))
+                    for i in range(len(data))])
+        
+        knee_angle = np.degrees([self.q_angle(q) for q in q_k])
+        ankle_angle = np.degrees([self.q_angle(q) for q in q_a])
         
         # 쿼터니안 사이의 각도를 계산하여 저장
-        knee_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, :4], Quaternions[:, 4:8])])
-        ankle_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, 4:8], Quaternions[:, 8:12])])
+        # knee_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, :4], Quaternions[:, 4:8])])
+        # ankle_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, 4:8], Quaternions[:, 8:12])])
 
         # 초기 각도를 빼줌
-        if self.initial_knee_angle is not None:
-            knee_angle -= self.initial_knee_angle
-        if self.initial_ankle_angle is not None:
-            ankle_angle -= self.initial_ankle_angle
+        # if self.initial_knee_angle is not None:
+        #     knee_angle -= self.initial_knee_angle
+        # if self.initial_ankle_angle is not None:
+        #     ankle_angle -= self.initial_ankle_angle
 
         self.data_buffer = []
         self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+
+    # 쿼터니언 곱셈 함수
+    def q_mult(q1, q2):
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+        w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+        x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+        y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+        z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+        return np.array([w, x, y, z])
+
+    # 쿼터니언 켤레 함수
+    def q_conj(q):
+        w, x, y, z = q
+        return np.array([w, -x, -y, -z])
+
+    # 회전 각도를 계산하는 함수
+    def q_angle(q):
+        w = q[0]
+        return 2 * np.arccos(w)
 
     def calculate_angle(self, q1, q2):
         q1 = np.asarray(q1)
