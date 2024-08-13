@@ -108,11 +108,11 @@ class SerialReader(QThread):
         q_foot  = data[:, 10:14]
         Pressure = data[:, 14]
 
-        q_k = np.array([self.q_mult(self.q_mult(q_shank[i], self.q_conj(q_si)),
+        q_k = np.array([self.q_mult(self.q_mult(q_shank[i], self.q_conj(self.q_si)),
                        self.q_mult(self.q_ti, self.q_conj(q_thigh[i])))
                     for i in range(len(data))])
 
-        q_a = np.array([self.q_mult(self.q_mult(q_foot[i], self.q_conj(q_fi)),
+        q_a = np.array([self.q_mult(self.q_mult(q_foot[i], self.q_conj(self.q_fi)),
                        self.q_mult(self.q_si, self.q_conj(q_shank[i])))
                     for i in range(len(data))])
         
