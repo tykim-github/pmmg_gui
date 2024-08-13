@@ -181,17 +181,21 @@ class SerialDataSaver(QWidget):
         monitor = get_monitors()[0]
         screen_width = monitor.width
         screen_height = monitor.height
-        diagonal_in_inches = (monitor.width_mm**2 + monitor.height_mm**2)**0.5 / 25.4
-        dpi = (screen_width**2 + screen_height**2)**0.5 / diagonal_in_inches
+        
+        screen = QApplication.primaryScreen()
+        qt_dpi = screen.physicalDotsPerInch()
 
-        base_font_size_px = int(min(screen_width, screen_height) * 0.02)
-        base_font_size_pt = int(1.2 * base_font_size_px * 72 / dpi)
+        base_dpi = 96  # Matplotlib에서 기본적으로 사용되는 DPI
+        scale_factor = qt_dpi / base_dpi
 
-        plt.rcParams['font.size'] = base_font_size_pt
-        plt.rcParams['axes.labelsize'] = base_font_size_pt
-        plt.rcParams['xtick.labelsize'] = base_font_size_pt
-        plt.rcParams['ytick.labelsize'] = base_font_size_pt
-        plt.rcParams['legend.fontsize'] = base_font_size_pt
+        base_font_size_px = int(14 * scale_factor)
+
+        plt.rcParams['figure.dpi'] = qt_dpi  # Matplotlib의 DPI를 PyQt의 DPI에 맞춥니다.
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['axes.labelsize'] = 10
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['legend.fontsize'] = 8
 
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
