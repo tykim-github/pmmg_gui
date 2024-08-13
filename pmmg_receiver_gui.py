@@ -183,7 +183,7 @@ class SerialDataSaver(QWidget):
         screen_height = monitor.height
         # window_width = int(screen_width * 0.5)  # 모니터 너비의 50%
         # window_height = int(screen_height * 0.5)  # 모니터 높이의 50%
-        self.setGeometry(screen_width * 0.15, screen_height * 0.1, screen_width * 0.7, screen_height * 0.8)
+        self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
         layout = QVBoxLayout()
         base_font_size = int(min(screen_width, screen_height) * 0.02)  # 해상도의 1.5%를 폰트 크기로 설정
