@@ -1,6 +1,0 @@
-q_ti=None
-q_si=None
-q_fi=None
-initial_knee_angle=None
-initial_ankle_angle=None
-
