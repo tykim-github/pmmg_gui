@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import serial.tools.list_ports
 import numpy.linalg as LA
+from scipy.signal import butter, filtfilt
+
 
 class FileHandler:
     def __init__(self, filename_prefix):
@@ -229,9 +231,9 @@ class SerialDataSaver(QWidget):
         # Adjust the scale factor inversely for Matplotlib fonts based on DPI
         scale_factor = 96 / qt_dpi
         plt.rcParams['font.size'] = base_font_size_px * scale_factor  # 계산된 픽셀 크기를 직접 설정
-        plt.rcParams['axes.labelsize'] = base_font_size_px * scale_factor
-        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.8 * scale_factor)
-        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.8 * scale_factor)
+        plt.rcParams['axes.labelsize'] = base_font_size_px * 0.6 * scale_factor
+        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
+        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
         plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.8 * scale_factor)
 
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
@@ -241,11 +243,6 @@ class SerialDataSaver(QWidget):
         self.fig = plt.figure(figsize=(15, 15))  # Figure 생성
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
-
-        # Grid definition
-        # self.axes = [self.fig.add_subplot(3, 3, i) for i in range(1, 4)]  # 첫 번째 행 (3개의 그래프)
-        # self.axes.append(self.fig.add_subplot(3, 1, 2))  # 두 번째 행
-        # self.axes.append(self.fig.add_subplot(3, 1, 3))  # 세 번째 행
 
         # 3행 1열의 그래프 배치로 수정
         self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
@@ -364,9 +361,22 @@ class SerialDataSaver(QWidget):
         knee_velocity = np.diff(knee_angle) / dt  # 무릎 관절각속도 계산
         ankle_velocity = np.diff(ankle_angle) / dt  # 발목 관절각속도 계산
 
-        # 두 번째 행: 관절각속도 플로팅
-        self.axes[1].plot(Time_sec[:-1], knee_velocity, color='darkred', label='Knee joint velocity')
-        self.axes[1].plot(Time_sec[:-1], ankle_velocity, color='darkblue', label='Ankle joint velocity')
+        # 저역통과 필터 적용 (cutoff frequency: 50Hz, order: 2)
+        def lowpass_filter(data, cutoff_freq, fs, order=2):
+            nyquist_freq = 0.5 * fs
+            normal_cutoff = cutoff_freq / nyquist_freq
+            b, a = butter(order, normal_cutoff, btype='low', analog=False)
+            return filtfilt(b, a, data)
+
+        # 샘플링 주파수 (Sampling frequency, fs)
+        fs = 1 / np.mean(dt)  # Time_sec의 평균 샘플링 주파수 계산 (Hz)
+        
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 50, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 50, fs)
+
+        # 두 번째 행: 필터링된 관절각속도 플로팅
+        self.axes[1].plot(Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
+        self.axes[1].plot(Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
         self.axes[1].set_xlabel("Time (sec)")
         self.axes[1].set_ylabel("Angular Velocity (deg/sec)")
         self.axes[1].legend()
