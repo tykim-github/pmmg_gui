@@ -243,9 +243,12 @@ class SerialDataSaver(QWidget):
         layout.addWidget(self.canvas)
 
         # Grid definition
-        self.axes = [self.fig.add_subplot(3, 3, i) for i in range(1, 4)]  # 첫 번째 행 (3개의 그래프)
-        self.axes.append(self.fig.add_subplot(3, 1, 2))  # 두 번째 행
-        self.axes.append(self.fig.add_subplot(3, 1, 3))  # 세 번째 행
+        # self.axes = [self.fig.add_subplot(3, 3, i) for i in range(1, 4)]  # 첫 번째 행 (3개의 그래프)
+        # self.axes.append(self.fig.add_subplot(3, 1, 2))  # 두 번째 행
+        # self.axes.append(self.fig.add_subplot(3, 1, 3))  # 세 번째 행
+
+        # 3행 1열의 그래프 배치로 수정
+        self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
 
         self.status_label = QLabel("Status: None")  # 초기 상태 메시지
         self.status_label.setAlignment(Qt.AlignCenter)  # 텍스트 가운데 정렬
@@ -346,35 +349,35 @@ class SerialDataSaver(QWidget):
         for ax in self.axes:
             ax.clear()
 
-        Time_sec = Time / 1000.0
+        Time_sec = Time / 1000.0  # 시간(ms)를 초(sec)로 변환
 
-        # 색상 설정
-        colors = ['black', 'red', 'green', 'blue']
-        labelcomponent = ['w', 'x', 'y', 'z']
+        # 첫 번째 행: 관절각도 플로팅
+        self.axes[0].plot(Time_sec, knee_angle, color='darkred', label='Knee joint')
+        self.axes[0].plot(Time_sec, ankle_angle, color='darkblue', label='Ankle joint')
+        self.axes[0].set_xlabel("Time (sec)")
+        self.axes[0].set_ylabel("Angle (deg)")
+        self.axes[0].legend()
+        self.axes[0].grid(True)
 
-        # 첫 번째 행: 각 IMU의 쿼터니언 데이터 플로팅
-        for i in range(3):  # 각 IMU에 대하여
-            for j in range(4):  # 각 쿼터니언 컴포넌트(w, x, y, z)
-                self.axes[i].plot(Time_sec, Quaternions[:, i*4+j], color=colors[j], label=labelcomponent[j])
-            self.axes[i].set_xlabel("Time (sec)")
-            self.axes[i].set_ylabel("Quaternion")
-            self.axes[i].legend()
-            self.axes[i].grid(True)
+        # 각속도 계산
+        dt = np.diff(Time_sec)  # 시간 간격 계산
+        knee_velocity = np.diff(knee_angle) / dt  # 무릎 관절각속도 계산
+        ankle_velocity = np.diff(ankle_angle) / dt  # 발목 관절각속도 계산
 
-        # 두 번째 행: 쿼터니안 사이의 각도 플로팅
-        self.axes[3].plot(Time_sec, knee_angle, color='darkred', label='Knee joint')
-        self.axes[3].plot(Time_sec, ankle_angle, color='darkblue', label='Ankle joint')
-        self.axes[3].set_xlabel("Time (sec)")
-        self.axes[3].set_ylabel("Angle (deg)")
-        self.axes[3].legend()
-        self.axes[3].grid(True)
+        # 두 번째 행: 관절각속도 플로팅
+        self.axes[1].plot(Time_sec[:-1], knee_velocity, color='darkred', label='Knee joint velocity')
+        self.axes[1].plot(Time_sec[:-1], ankle_velocity, color='darkblue', label='Ankle joint velocity')
+        self.axes[1].set_xlabel("Time (sec)")
+        self.axes[1].set_ylabel("Angular Velocity (deg/sec)")
+        self.axes[1].legend()
+        self.axes[1].grid(True)
 
         # 세 번째 행: 압력 데이터를 짙은 빨강색으로 플로팅
-        self.axes[4].plot(Time_sec, Pressure, color='black', label='pMMG')
-        self.axes[4].set_xlabel("Time (sec)")
-        self.axes[4].set_ylabel("Pressure (kPa)")
-        self.axes[4].legend()
-        self.axes[4].grid(True)
+        self.axes[2].plot(Time_sec, Pressure, color='black', label='pMMG')
+        self.axes[2].set_xlabel("Time (sec)")
+        self.axes[2].set_ylabel("Pressure (kPa)")
+        self.axes[2].legend()
+        self.axes[2].grid(True)
 
         # 캔버스에 변경사항 반영하여 다시 그리기
         self.canvas.draw()
