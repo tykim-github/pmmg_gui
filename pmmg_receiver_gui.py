@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import serial
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout, QFileDialog
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from screeninfo import get_monitors
 
@@ -9,6 +9,33 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import serial.tools.list_ports
 import numpy.linalg as LA
+
+class FileHandler:
+    def __init__(self, filename_prefix):
+        self.filename_prefix = filename_prefix
+        self.session_index = 1
+        self.file = None
+
+    def open_new_file(self, header_data):
+        if self.file is not None:
+            return # 이미 파일이 열려 있다면 새로 열지 않음
+        filename = f"{self.filename_prefix}_{str(self.session_index).zfill(2)}.txt"
+        self.file = open(filename, "w")
+        # 헤더 데이터를 키-값 쌍으로 저장
+        for key, value in header_data.items():
+            value_str = ','.join(map(str, value)) if isinstance(value, (list, np.ndarray)) else str(value)
+            self.file.write(f"{key}={value_str}\n")
+        self.file.write("\n")  # 헤더와 본문을 구분하는 빈 줄 추가
+        self.session_index += 1
+
+    def write_line(self, line):
+        if self.file:
+            self.file.write(line + "\n")
+
+    def close_file(self):
+        if self.file:
+            self.file.close()
+            self.file = None
 
 class SerialReader(QThread):
     data_processed = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)  # 시간, 쿼터니언, 압력 데이터를 전달할 시그널
@@ -18,14 +45,18 @@ class SerialReader(QThread):
 
     def __init__(self, filename, parent=None):
         super().__init__(parent)
+        self.file_handler = FileHandler(filename)
         self.filename = filename
         self.running = False
         self.collecting = False
         self.data_buffer = []
-        self.session_index = 1
         self.initial_knee_angle = None
         self.initial_ankle_angle = None
         self.initial_quaternions = None
+        self.q_ti = None
+        self.q_si = None
+        self.q_fi = None
+
 
     def run(self):
         self.running = True
@@ -51,26 +82,25 @@ class SerialReader(QThread):
                         self.collecting = False
                     elif state == "104":
                         self.data_buffer = []  # 초기화
-                        if file:
-                            file.close()  # 현재 파일이 열려있다면 닫기
-                        filename = f"{self.filename}_{str(self.session_index).zfill(2)}.txt"
-                        file = open(filename, "w")  # 새 파일 생성
-                        self.session_index += 1
+                        header_data = {
+                            'q_ti': self.q_ti,
+                            'q_si': self.q_si,
+                            'q_fi': self.q_fi,
+                            'initial_knee_angle': self.initial_knee_angle,
+                            'initial_ankle_angle': self.initial_ankle_angle
+                        }
+                        self.file_handler.open_new_file(header_data)  # 새 파일 생성
                         self.collecting = True
                     elif state == "105" and self.collecting:
                         self.process_data()
                         self.collecting = False
-                        if file:
-                            file.close()  # 데이터 수집 완료 후 파일 닫기
-                            file = None
+                        self.file_handler.close_file()  # 데이터 수집 완료 후 파일 닫기
                     elif self.collecting:
                         self.data_buffer.append(line)
-                        if state != "102" and state != "103" and state != "104" and state != "105":
-                            if file:
-                                file.write(line + "\n")  # 데이터를 파일에 계속 기록
+                        if state not in {"102", "103", "104", "105"}:
+                            self.file_handler.write_line(line)  # 데이터를 파일에 계속 기록
         finally:
-            if file:
-                file.close()  # 프로그램 종료시 열려있는 파일 닫기
+            self.file_handler.close_file()  # 프로그램 종료 시 열려있는 파일 닫기
             ser.close()
 
     def calculate_initial_state(self):
@@ -89,10 +119,20 @@ class SerialReader(QThread):
         self.q_fi = avg_quaternions[8:12]
 
         # 무릎과 발목의 초기 각도 계산
-        self.initial_knee_angle = self.calculate_angle(self.q_ti, self.q_si)
-        self.initial_ankle_angle = self.calculate_angle(self.q_si, self.q_fi)
+        self.initial_knee_angle = Quaternion.calculate_angle(self.q_ti, self.q_si)
+        self.initial_ankle_angle = Quaternion.calculate_angle(self.q_si, self.q_fi)
 
         self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
+
+        header_data = {
+            'q_ti': self.q_ti,
+            'q_si': self.q_si,
+            'q_fi': self.q_fi,
+            'initial_knee_angle': self.initial_knee_angle,
+            'initial_ankle_angle': self.initial_ankle_angle
+            # 필요시 추가적인 데이터를 여기에 포함
+        }
+        self.file_handler.open_new_file(header_data)
 
         # 초기 각도를 로그로 출력 또는 시그널로 전달
         print(f"Initial Knee Angle: {self.initial_knee_angle} degrees")
@@ -110,34 +150,28 @@ class SerialReader(QThread):
         q_foot  = data[:, 10:14]
         Pressure = data[:, 14]
 
-        q_k = np.array([self.q_mult(self.q_mult(q_shank[i], self.q_conj(self.q_si)),
-                       self.q_mult(self.q_ti, self.q_conj(q_thigh[i])))
+        q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(self.q_si)),
+                       Quaternion.mult(self.q_ti, Quaternion.conj(q_thigh[i])))
                     for i in range(len(data))])
 
-        q_a = np.array([self.q_mult(self.q_mult(q_foot[i], self.q_conj(self.q_fi)),
-                       self.q_mult(self.q_si, self.q_conj(q_shank[i])))
+        q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(self.q_fi)),
+                       Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
                     for i in range(len(data))])
         
-        knee_angle = np.degrees([self.q_angle(q) for q in q_k])
-        ankle_angle = np.degrees([self.q_angle(q) for q in q_a])
-        
-        # 쿼터니안 사이의 각도를 계산하여 저장
-        # knee_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, :4], Quaternions[:, 4:8])])
-        # ankle_angle = np.array([self.calculate_angle(q1, q2) for q1, q2 in zip(Quaternions[:, 4:8], Quaternions[:, 8:12])])
-
-        # 초기 각도를 빼줌
-        # if self.initial_knee_angle is not None:
-        #     knee_angle -= self.initial_knee_angle
-        # if self.initial_ankle_angle is not None:
-        #     ankle_angle -= self.initial_ankle_angle
+        knee_angle = np.degrees([Quaternion.angle(q) for q in q_k])
+        ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a])
 
         self.data_buffer = []
         self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
-    # 쿼터니언 곱셈 함수
-    def q_mult(self, q1, q2):
-        q1 = q1 / np.linalg.norm(q1)  # 쿼터니언 정규화
-        q2 = q2 / np.linalg.norm(q2)  # 쿼터니언 정규화
+    def stop(self):
+        self.running = False
+
+class Quaternion:
+    @staticmethod
+    def mult(q1, q2):
+        q1 = q1 / np.linalg.norm(q1)
+        q2 = q2 / np.linalg.norm(q2)
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
         w = w1*w2 - x1*x2 - y1*y2 - z1*z2
@@ -146,17 +180,18 @@ class SerialReader(QThread):
         z = w1*z2 + x1*y2 - y1*x2 + z1*w2
         return np.array([w, x, y, z])
 
-    # 쿼터니언 켤레 함수
-    def q_conj(self, q):
+    @staticmethod
+    def conj(q):
         w, x, y, z = q
         return np.array([w, -x, -y, -z])
 
-    # 회전 각도를 계산하는 함수
-    def q_angle(self, q):
+    @staticmethod
+    def angle(q):
         w = q[0]
         return 2 * np.arccos(w)
 
-    def calculate_angle(self, q1, q2):
+    @staticmethod
+    def calculate_angle(q1, q2):
         q1 = np.asarray(q1)
         q2 = np.asarray(q2)
         
@@ -167,9 +202,6 @@ class SerialReader(QThread):
         
         return angle_degrees
 
-    def stop(self):
-        self.running = False
-
 class SerialDataSaver(QWidget):
     def __init__(self):
         super().__init__()
@@ -177,7 +209,6 @@ class SerialDataSaver(QWidget):
         self.init_ui()
 
     def init_ui(self):
-
         monitor = get_monitors()[0]
         screen_width = monitor.width
         screen_height = monitor.height
@@ -212,10 +243,9 @@ class SerialDataSaver(QWidget):
         layout.addWidget(self.canvas)
 
         # Grid definition
-        # self.axes = [self.fig.add_subplot(3, 3, i) for i in range(1, 4)]  # 첫 번째 행 (3개의 그래프)
-        # self.axes.append(self.fig.add_subplot(3, 1, 2))  # 두 번째 행
-        # self.axes.append(self.fig.add_subplot(3, 1, 3))  # 세 번째 행
-        self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
+        self.axes = [self.fig.add_subplot(3, 3, i) for i in range(1, 4)]  # 첫 번째 행 (3개의 그래프)
+        self.axes.append(self.fig.add_subplot(3, 1, 2))  # 두 번째 행
+        self.axes.append(self.fig.add_subplot(3, 1, 3))  # 세 번째 행
 
         self.status_label = QLabel("Status: None")  # 초기 상태 메시지
         self.status_label.setAlignment(Qt.AlignCenter)  # 텍스트 가운데 정렬
@@ -246,6 +276,11 @@ class SerialDataSaver(QWidget):
         end_btn.clicked.connect(self.close_app)
         buttons_layout.addWidget(end_btn)
 
+        load_btn = QPushButton('LOAD DATA', self)
+        load_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+        load_btn.clicked.connect(self.load_data)
+        buttons_layout.addWidget(load_btn)
+
         layout.addLayout(buttons_layout)
         self.setLayout(layout)
         self.setWindowTitle('Spasticity Measurement Software')
@@ -266,47 +301,80 @@ class SerialDataSaver(QWidget):
         self.thread.initial_angles_calculated.connect(self.display_initial_angles)
         self.thread.start()
 
-    def close_app(self):
-        if self.thread and self.thread.isRunning():
-            self.thread.stop()
-            self.thread.wait()
-        self.start_btn.setEnabled(True)
-        self.filename_input.setEnabled(True)
+    def load_data(self):
+        options = QFileDialog.Options()
+        file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
+        if file_name:
+            header_data = {}
+            with open(file_name, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line:
+                        break  # 빈 줄을 만나면 헤더 끝으로 간주
+                    key, value_str = line.split('=')
+                    values = list(map(float, value_str.split(',')))
+                    header_data[key] = np.array(values) if len(values) > 1 else values[0]
+                
+                # header_data에서 필요한 값들을 불러옴
+                q_ti = header_data.get('q_ti')
+                q_si = header_data.get('q_si')
+                q_fi = header_data.get('q_fi')
+
+                data = np.loadtxt(file, delimiter=',')
+                Time = data[:, 1]
+                Quaternions = data[:, 2:14]
+                Pressure = data[:, 14]
+                q_thigh = data[:, 2:6]
+                q_shank = data[:, 6:10]
+                q_foot = data[:, 10:14]
+
+                q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(q_si)),
+                            Quaternion.mult(q_ti, Quaternion.conj(q_thigh[i])))
+                            for i in range(len(data))])
+
+                q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(q_fi)),
+                            Quaternion.mult(q_si, Quaternion.conj(q_shank[i])))
+                            for i in range(len(data))])
+
+                knee_angle = np.degrees([Quaternion.angle(q) for q in q_k])
+                ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a])
+
+                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
     def plot_data(self, Time, Quaternions, Pressure, knee_angle, ankle_angle):
         # 모든 그래프를 초기화
         for ax in self.axes:
             ax.clear()
 
-        Time_sec = Time / 1000.0  # 시간(ms)를 초(sec)로 변환
+        Time_sec = Time / 1000.0
 
-        # 첫 번째 행: 관절각도 플로팅
-        self.axes[0].plot(Time_sec, knee_angle, color='darkred', label='Knee joint')
-        self.axes[0].plot(Time_sec, ankle_angle, color='darkblue', label='Ankle joint')
-        self.axes[0].set_xlabel("Time (sec)")
-        self.axes[0].set_ylabel("Angle (deg)")
-        self.axes[0].legend()
-        self.axes[0].grid(True)
+        # 색상 설정
+        colors = ['black', 'red', 'green', 'blue']
+        labelcomponent = ['w', 'x', 'y', 'z']
 
-        # 각속도 계산
-        dt = np.diff(Time_sec)  # 시간 간격 계산
-        knee_velocity = np.diff(knee_angle) / dt  # 무릎 관절각속도 계산
-        ankle_velocity = np.diff(ankle_angle) / dt  # 발목 관절각속도 계산
+        # 첫 번째 행: 각 IMU의 쿼터니언 데이터 플로팅
+        for i in range(3):  # 각 IMU에 대하여
+            for j in range(4):  # 각 쿼터니언 컴포넌트(w, x, y, z)
+                self.axes[i].plot(Time_sec, Quaternions[:, i*4+j], color=colors[j], label=labelcomponent[j])
+            self.axes[i].set_xlabel("Time (sec)")
+            self.axes[i].set_ylabel("Quaternion")
+            self.axes[i].legend()
+            self.axes[i].grid(True)
 
-        # 두 번째 행: 관절각속도 플로팅
-        self.axes[1].plot(Time_sec[:-1], knee_velocity, color='darkred', label='Knee joint velocity')
-        self.axes[1].plot(Time_sec[:-1], ankle_velocity, color='darkblue', label='Ankle joint velocity')
-        self.axes[1].set_xlabel("Time (sec)")
-        self.axes[1].set_ylabel("Angular Velocity (deg/sec)")
-        self.axes[1].legend()
-        self.axes[1].grid(True)
+        # 두 번째 행: 쿼터니안 사이의 각도 플로팅
+        self.axes[3].plot(Time_sec, knee_angle, color='darkred', label='Knee joint')
+        self.axes[3].plot(Time_sec, ankle_angle, color='darkblue', label='Ankle joint')
+        self.axes[3].set_xlabel("Time (sec)")
+        self.axes[3].set_ylabel("Angle (deg)")
+        self.axes[3].legend()
+        self.axes[3].grid(True)
 
         # 세 번째 행: 압력 데이터를 짙은 빨강색으로 플로팅
-        self.axes[2].plot(Time_sec, Pressure, color='black', label='pMMG')
-        self.axes[2].set_xlabel("Time (sec)")
-        self.axes[2].set_ylabel("Pressure (kPa)")
-        self.axes[2].legend()
-        self.axes[2].grid(True)
+        self.axes[4].plot(Time_sec, Pressure, color='black', label='pMMG')
+        self.axes[4].set_xlabel("Time (sec)")
+        self.axes[4].set_ylabel("Pressure (kPa)")
+        self.axes[4].legend()
+        self.axes[4].grid(True)
 
         # 캔버스에 변경사항 반영하여 다시 그리기
         self.canvas.draw()
@@ -330,6 +398,13 @@ class SerialDataSaver(QWidget):
 
     def display_initial_angles(self, knee_angle, ankle_angle):
         self.initial_angles_label.setText(f"Initial Knee Angle: {knee_angle:.2f} degrees, Initial Ankle Angle: {ankle_angle:.2f} degrees")
+
+    def close_app(self):
+        if self.thread and self.thread.isRunning():
+            self.thread.stop()
+            self.thread.wait()
+        self.start_btn.setEnabled(True)
+        self.filename_input.setEnabled(True)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
