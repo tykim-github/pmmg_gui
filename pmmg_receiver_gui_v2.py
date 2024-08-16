@@ -1,7 +1,10 @@
+import os
 import sys
 import numpy as np
 import serial
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout, QFileDialog, QCheckBox, QFormLayout
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, 
+                             QLineEdit, QLabel, QHBoxLayout, QFileDialog, 
+                             QCheckBox, QFormLayout)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QPixmap
 from screeninfo import get_monitors
@@ -11,11 +14,12 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 import serial.tools.list_ports
-import numpy.linalg as LA
+from numpy.linalg import norm
 from scipy.signal import butter, filtfilt
 
 # to make this exe
-# pyinstaller --onefile --noconsole --icon=legmus.ico pmmg_receiver_gui_v2.py
+# pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
+
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -63,7 +67,7 @@ class DataProcessor:
         data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
         Quaternions = data[:, 2:14]
 
-        Quaternions /= LA.norm(Quaternions, axis=1)[:, np.newaxis]
+        Quaternions /= norm(Quaternions, axis=1)[:, np.newaxis]
         avg_quaternions = np.mean(Quaternions, axis=0)
 
         self.q_ti = avg_quaternions[:4]
@@ -265,9 +269,17 @@ class SerialDataSaver(QWidget):
 
        # Add image between status label and input fields
         self.image_label = QLabel(self)
-        pixmap = QPixmap("joint_angle_definition.png")  # 이미지 파일 경로
+        # 실행 파일 내부에서 이미지 경로를 찾기 위해서 다음과 같이 수정
+        if hasattr(sys, '_MEIPASS'):
+            # PyInstaller로 패키징된 경우 실행 디렉토리 경로 설정
+            image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
+        else:
+            # 일반적인 실행 환경에서 이미지 경로 설정
+            image_path = "joint_angle_definition.png"
+
+        pixmap = QPixmap(image_path)
         max_image_width = int(screen_width * 0.3)
-        max_image_height = int(screen_height * 0.3)  
+        max_image_height = int(screen_height * 0.3)
         scaled_pixmap = pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled_pixmap)
         self.image_label.setAlignment(Qt.AlignCenter)
