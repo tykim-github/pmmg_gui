@@ -2,6 +2,7 @@
 *.exe
 *.txt
 *.png
+*.spec
 
 # Ignore PyInstaller build directories
 /build/
