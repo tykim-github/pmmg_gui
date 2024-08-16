@@ -14,6 +14,9 @@ import serial.tools.list_ports
 import numpy.linalg as LA
 from scipy.signal import butter, filtfilt
 
+# to make this exe
+# pyinstaller --onefile --noconsole --icon=legmus.ico pmmg_receiver_gui_v2.py
+
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
         self.initial_knee_angle = initial_knee_angle
@@ -171,62 +174,6 @@ class SerialReader(QThread):
         finally:
             self.file_handler.close_file()
             ser.close()
-
-    # def calculate_initial_state(self):
-    #     """Calculate initial state based on collected data."""
-    #     if not self.data_buffer:
-    #         return
-    #     data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
-    #     Quaternions = data[:, 2:14]
-
-    #     Quaternions /= LA.norm(Quaternions, axis=1)[:, np.newaxis]
-    #     avg_quaternions = np.mean(Quaternions, axis=0)
-
-    #     self.q_ti = avg_quaternions[:4]
-    #     self.q_si = avg_quaternions[4:8]
-    #     self.q_fi = avg_quaternions[8:12]
-
-    #     self.initial_knee_angle = self.header_info['Initial Knee Angle (deg)']
-    #     self.initial_ankle_angle = self.header_info['Initial Ankle Angle (deg)']
-
-    #     self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
-
-    #     header_data = {
-    #         'q_ti': self.q_ti,
-    #         'q_si': self.q_si,
-    #         'q_fi': self.q_fi,
-    #         'initial_knee_angle': self.initial_knee_angle,
-    #         'initial_ankle_angle': self.initial_ankle_angle,
-    #         **self.header_info  # Add patient info to header
-    #     }
-    #     self.file_handler.open_new_file(header_data)
-    #     # self.initial_angles_calculated.emit(self.initial_knee_angle, self.initial_ankle_angle)
-
-    # def process_data(self):
-    #     """Process and emit data after collection."""
-    #     if not self.data_buffer:
-    #         return
-    #     data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
-    #     Time = data[:, 1]
-    #     Quaternions = data[:, 2:14]
-    #     q_thigh = data[:, 2:6]
-    #     q_shank = data[:, 6:10]
-    #     q_foot = data[:, 10:14]
-    #     Pressure = data[:, 14]
-
-    #     q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(self.q_si)),
-    #                    Quaternion.mult(self.q_ti, Quaternion.conj(q_thigh[i])))
-    #                 for i in range(len(data))])
-
-    #     q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(self.q_fi)),
-    #                    Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
-    #                 for i in range(len(data))])
-        
-    #     knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle
-    #     ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle
-
-    #     self.data_buffer = []
-    #     self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
     def stop(self):
         """Stop the serial reading thread."""
