@@ -3,6 +3,7 @@
 *.txt
 *.png
 *.spec
+*.ico
 
 # Ignore PyInstaller build directories
 /build/
