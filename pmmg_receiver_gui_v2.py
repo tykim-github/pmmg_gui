@@ -3,14 +3,71 @@ import numpy as np
 import serial
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout, QFileDialog, QCheckBox, QFormLayout
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QPixmap
 from screeninfo import get_monitors
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+
 import serial.tools.list_ports
 import numpy.linalg as LA
 from scipy.signal import butter, filtfilt
 
+class DataProcessor:
+    def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
+        self.initial_knee_angle = initial_knee_angle
+        self.initial_ankle_angle = initial_ankle_angle
+        self.q_ti = None
+        self.q_si = None
+        self.q_fi = None
+        self.data_buffer = []
+
+    def initialize_from_header(self, header_data):
+        """헤더 데이터에서 초기 각도를 설정합니다."""
+        self.initial_knee_angle = header_data.get('initial_knee_angle')
+        self.initial_ankle_angle = header_data.get('initial_ankle_angle')
+        self.q_ti = header_data.get('q_ti')
+        self.q_si = header_data.get('q_si')
+        self.q_fi = header_data.get('q_fi')
+
+    def process_data(self, data):
+        """데이터를 처리하여 결과를 반환합니다."""
+        Time = data[:, 1]
+        Quaternions = data[:, 2:14]
+        Pressure = data[:, 14]
+        q_thigh = data[:, 2:6]
+        q_shank = data[:, 6:10]
+        q_foot = data[:, 10:14]
+
+        q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(self.q_si)),
+                        Quaternion.mult(self.q_ti, Quaternion.conj(q_thigh[i])))
+                        for i in range(len(data))])
+
+        q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(self.q_fi)),
+                        Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
+                        for i in range(len(data))])
+
+        knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle
+        ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle
+
+        return Time, Quaternions, Pressure, knee_angle, ankle_angle
+
+    def calculate_initial_state(self):
+        """초기 상태를 계산하여 쿼터니언을 설정합니다."""
+        if not self.data_buffer:
+            return
+        data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
+        Quaternions = data[:, 2:14]
+
+        Quaternions /= LA.norm(Quaternions, axis=1)[:, np.newaxis]
+        avg_quaternions = np.mean(Quaternions, axis=0)
+
+        self.q_ti = avg_quaternions[:4]
+        self.q_si = avg_quaternions[4:8]
+        self.q_fi = avg_quaternions[8:12]
+
+        self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
 
 class FileHandler:
     def __init__(self, filename_prefix):
@@ -49,20 +106,15 @@ class SerialReader(QThread):
     state_changed = pyqtSignal(str)
     initial_angles_calculated = pyqtSignal(float, float)
 
-    def __init__(self, filename, header_info, parent=None):
+    def __init__(self, filename, header_info, processor, parent=None):
         super().__init__(parent)
         self.file_handler = FileHandler(filename)
         self.header_info = header_info
+        self.processor = processor
         self.filename = filename
         self.running = False
         self.collecting = False
         self.data_buffer = []
-        self.initial_knee_angle = None
-        self.initial_ankle_angle = None
-        self.initial_quaternions = None
-        self.q_ti = None
-        self.q_si = None
-        self.q_fi = None
 
     def run(self):
         """Main loop for reading serial data."""
@@ -89,93 +141,92 @@ class SerialReader(QThread):
                     if state != "0":
                         self.state_changed.emit(state)
                     if state == "102":
-                        self.data_buffer = []  # Reset buffer
+                        self.processor.data_buffer = []  # Reset buffer
                         self.collecting = True
                     elif state == "103" and self.collecting:
-                        self.calculate_initial_state()
+                        self.processor.calculate_initial_state()
                         self.collecting = False
                     elif state == "104":
-                        self.data_buffer = []  # Reset buffer
+                        self.processor.data_buffer = []  # Reset buffer
                         header_data = {
-                            'q_ti': self.q_ti,
-                            'q_si': self.q_si,
-                            'q_fi': self.q_fi,
-                            'initial_knee_angle': self.initial_knee_angle,
-                            'initial_ankle_angle': self.initial_ankle_angle,
+                            'q_ti': self.processor.q_ti,
+                            'q_si': self.processor.q_si,
+                            'q_fi': self.processor.q_fi,
+                            'initial_knee_angle': self.processor.initial_knee_angle,
+                            'initial_ankle_angle': self.processor.initial_ankle_angle,
                             **self.header_info  # Add patient info to header
                         }
                         self.file_handler.open_new_file(header_data)
                         self.collecting = True
                     elif state == "105" and self.collecting:
-                        self.process_data()
+                        data = np.array([list(map(float, x.split(','))) for x in self.processor.data_buffer])
+                        Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+                        self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
                         self.collecting = False
                         self.file_handler.close_file()
                     elif self.collecting:
-                        self.data_buffer.append(line)
+                        self.processor.data_buffer.append(line)
                         if state not in {"102", "103", "104", "105"}:
                             self.file_handler.write_line(line)
         finally:
             self.file_handler.close_file()
             ser.close()
 
-    def calculate_initial_state(self):
-        """Calculate initial state based on collected data."""
-        if not self.data_buffer:
-            return
-        data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
-        Quaternions = data[:, 2:14]
+    # def calculate_initial_state(self):
+    #     """Calculate initial state based on collected data."""
+    #     if not self.data_buffer:
+    #         return
+    #     data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
+    #     Quaternions = data[:, 2:14]
 
-        Quaternions /= LA.norm(Quaternions, axis=1)[:, np.newaxis]
-        avg_quaternions = np.mean(Quaternions, axis=0)
+    #     Quaternions /= LA.norm(Quaternions, axis=1)[:, np.newaxis]
+    #     avg_quaternions = np.mean(Quaternions, axis=0)
 
-        self.q_ti = avg_quaternions[:4]
-        self.q_si = avg_quaternions[4:8]
-        self.q_fi = avg_quaternions[8:12]
+    #     self.q_ti = avg_quaternions[:4]
+    #     self.q_si = avg_quaternions[4:8]
+    #     self.q_fi = avg_quaternions[8:12]
 
-        self.initial_knee_angle = Quaternion.calculate_angle(self.q_ti, self.q_si)
-        self.initial_ankle_angle = Quaternion.calculate_angle(self.q_si, self.q_fi)
+    #     self.initial_knee_angle = self.header_info['Initial Knee Angle (deg)']
+    #     self.initial_ankle_angle = self.header_info['Initial Ankle Angle (deg)']
 
-        self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
+    #     self.initial_quaternions = (self.q_ti, self.q_si, self.q_fi)
 
-        header_data = {
-            'q_ti': self.q_ti,
-            'q_si': self.q_si,
-            'q_fi': self.q_fi,
-            'initial_knee_angle': self.initial_knee_angle,
-            'initial_ankle_angle': self.initial_ankle_angle,
-            **self.header_info  # Add patient info to header
-        }
-        self.file_handler.open_new_file(header_data)
+    #     header_data = {
+    #         'q_ti': self.q_ti,
+    #         'q_si': self.q_si,
+    #         'q_fi': self.q_fi,
+    #         'initial_knee_angle': self.initial_knee_angle,
+    #         'initial_ankle_angle': self.initial_ankle_angle,
+    #         **self.header_info  # Add patient info to header
+    #     }
+    #     self.file_handler.open_new_file(header_data)
+    #     # self.initial_angles_calculated.emit(self.initial_knee_angle, self.initial_ankle_angle)
 
-        print(f"Initial Knee Angle: {self.initial_knee_angle} degrees")
-        print(f"Initial Ankle Angle: {self.initial_ankle_angle} degrees")
-        self.initial_angles_calculated.emit(self.initial_knee_angle, self.initial_ankle_angle)
+    # def process_data(self):
+    #     """Process and emit data after collection."""
+    #     if not self.data_buffer:
+    #         return
+    #     data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
+    #     Time = data[:, 1]
+    #     Quaternions = data[:, 2:14]
+    #     q_thigh = data[:, 2:6]
+    #     q_shank = data[:, 6:10]
+    #     q_foot = data[:, 10:14]
+    #     Pressure = data[:, 14]
 
-    def process_data(self):
-        """Process and emit data after collection."""
-        if not self.data_buffer:
-            return
-        data = np.array([list(map(float, x.split(','))) for x in self.data_buffer])
-        Time = data[:, 1]
-        Quaternions = data[:, 2:14]
-        q_thigh = data[:, 2:6]
-        q_shank = data[:, 6:10]
-        q_foot = data[:, 10:14]
-        Pressure = data[:, 14]
+    #     q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(self.q_si)),
+    #                    Quaternion.mult(self.q_ti, Quaternion.conj(q_thigh[i])))
+    #                 for i in range(len(data))])
 
-        q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(self.q_si)),
-                       Quaternion.mult(self.q_ti, Quaternion.conj(q_thigh[i])))
-                    for i in range(len(data))])
-
-        q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(self.q_fi)),
-                       Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
-                    for i in range(len(data))])
+    #     q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(self.q_fi)),
+    #                    Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
+    #                 for i in range(len(data))])
         
-        knee_angle = np.degrees([Quaternion.angle(q) for q in q_k])
-        ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a])
+    #     knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle
+    #     ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle
 
-        self.data_buffer = []
-        self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+    #     self.data_buffer = []
+    #     self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
     def stop(self):
         """Stop the serial reading thread."""
@@ -208,24 +259,13 @@ class Quaternion:
         w = q[0]
         return 2 * np.arccos(w)
 
-    @staticmethod
-    def calculate_angle(q1, q2):
-        """Calculate the angle between two quaternions."""
-        q1 = np.asarray(q1)
-        q2 = np.asarray(q2)
-        
-        dot_product = np.dot(q1, q2)
-        dot_product = dot_product / (np.linalg.norm(q1) * np.linalg.norm(q2))
-        angle = 2 * np.arccos(np.clip(np.abs(dot_product), -1.0, 1.0))
-        angle_degrees = np.degrees(angle)
-        
-        return angle_degrees
 
 
 class SerialDataSaver(QWidget):
     def __init__(self):
         super().__init__()
         self.thread = None
+        self.processor = DataProcessor()
         self.init_ui()
 
     def init_ui(self):
@@ -259,6 +299,10 @@ class SerialDataSaver(QWidget):
         self.canvas = FigureCanvas(self.fig)
         plot_layout.addWidget(self.canvas)
 
+        # Add the navigation toolbar
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        plot_layout.addWidget(self.toolbar)  # Add toolbar below the plot
+
         self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
 
         layout.addLayout(plot_layout, 2)  # Allocate 60% to 70% of width for plots
@@ -272,11 +316,15 @@ class SerialDataSaver(QWidget):
         self.status_label.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px; font-weight: bold;")
         control_layout.addWidget(self.status_label)  
 
-        # Initial angles label
-        self.initial_angles_label = QLabel("Initial Angles: Not calculated")
-        self.initial_angles_label.setAlignment(Qt.AlignCenter)
-        self.initial_angles_label.setStyleSheet(f"font-size: {base_font_size_px}px; font-weight: bold;")
-        control_layout.addWidget(self.initial_angles_label)
+       # Add image between status label and input fields
+        self.image_label = QLabel(self)
+        pixmap = QPixmap("joint_angle_definition.png")  # 이미지 파일 경로
+        max_image_width = int(screen_width * 0.3)
+        max_image_height = int(screen_height * 0.3)  
+        scaled_pixmap = pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        control_layout.addWidget(self.image_label)
 
         # Patient information inputs
         patient_info_layout = QFormLayout()
@@ -288,9 +336,13 @@ class SerialDataSaver(QWidget):
         self.patient_leg_thickness_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
         patient_info_layout.addRow("Leg Thickness (cm):", self.patient_leg_thickness_input)
 
-        self.initial_position_input = QLineEdit(self)
-        self.initial_position_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Initial Position:", self.initial_position_input)
+        self.initial_knee_angle_input = QLineEdit(self)
+        self.initial_knee_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Initial Knee Angle (deg):", self.initial_knee_angle_input)
+
+        self.initial_ankle_angle_input = QLineEdit(self)
+        self.initial_ankle_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Initial Ankle Angle (deg):", self.initial_ankle_angle_input)
 
         self.recorder_name_input = QLineEdit(self)
         self.recorder_name_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
@@ -332,7 +384,11 @@ class SerialDataSaver(QWidget):
         """Start the serial reading thread."""
         filename = self.filename_input.text()
         leg_thickness = self.patient_leg_thickness_input.text()
-        initial_position = self.initial_position_input.text()
+
+        # GUI에서 입력된 초기 각도 값을 가져옵니다.
+        initial_knee_angle = float(self.initial_knee_angle_input.text())
+        initial_ankle_angle = float(self.initial_ankle_angle_input.text())
+
         recorder_name = self.recorder_name_input.text()
 
         if not filename:
@@ -341,14 +397,18 @@ class SerialDataSaver(QWidget):
         self.start_btn.setEnabled(False)
         self.filename_input.setEnabled(False)
 
-        # Collect header info
+        # header_info에 초기 각도 값을 저장합니다.
         header_info = {
             "Leg Thickness (cm)": leg_thickness,
-            "Initial Position": initial_position,
+            "Initial Knee Angle (deg)": initial_knee_angle,
+            "Initial Ankle Angle (deg)": initial_ankle_angle,
             "Recorder Name": recorder_name
         }
 
-        self.thread = SerialReader(filename, header_info, self)
+        self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
+
+        # 쓰레드 시작
+        self.thread = SerialReader(filename, header_info, self.processor, self)
         self.thread.data_processed.connect(self.plot_data)
         self.thread.line_read.connect(self.handle_line_read)
         self.thread.state_changed.connect(self.update_status_label)
@@ -361,6 +421,8 @@ class SerialDataSaver(QWidget):
         file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
         if file_name:
             header_data = {}
+            
+            # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
             with open(file_name, 'r') as file:
                 for line in file:
                     line = line.strip()
@@ -376,30 +438,15 @@ class SerialDataSaver(QWidget):
                         # If the value cannot be converted to float, store it as a string
                         header_data[key] = value_str
 
-                q_ti = header_data.get('q_ti')
-                q_si = header_data.get('q_si')
-                q_fi = header_data.get('q_fi')
+            # DataProcessor 인스턴스를 초기화하고 헤더 정보를 로드합니다.
+            self.processor.initialize_from_header(header_data)
 
-                data = np.loadtxt(file, delimiter=',')
-                Time = data[:, 1]
-                Quaternions = data[:, 2:14]
-                Pressure = data[:, 14]
-                q_thigh = data[:, 2:6]
-                q_shank = data[:, 6:10]
-                q_foot = data[:, 10:14]
+            # 두 번째로 파일을 열어 데이터를 읽습니다.
+            data = np.loadtxt(file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
 
-                q_k = np.array([Quaternion.mult(Quaternion.mult(q_shank[i], Quaternion.conj(q_si)),
-                            Quaternion.mult(q_ti, Quaternion.conj(q_thigh[i])))
-                            for i in range(len(data))])
-
-                q_a = np.array([Quaternion.mult(Quaternion.mult(q_foot[i], Quaternion.conj(q_fi)),
-                            Quaternion.mult(q_si, Quaternion.conj(q_shank[i])))
-                            for i in range(len(data))])
-
-                knee_angle = np.degrees([Quaternion.angle(q) for q in q_k])
-                ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a])
-
-                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+            # 데이터를 처리하고 플롯을 그립니다.
+            Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+            self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
 
     def plot_data(self, Time, Quaternions, Pressure, knee_angle, ankle_angle):
         """Plot the processed data."""
@@ -415,7 +462,6 @@ class SerialDataSaver(QWidget):
         self.axes[0].legend()
         self.axes[0].grid(True)
 
-        # dt = np.diff(Time_sec)
         dt = 0.005
         knee_velocity = np.diff(knee_angle) / dt
         ankle_velocity = np.diff(ankle_angle) / dt
@@ -427,8 +473,8 @@ class SerialDataSaver(QWidget):
             return filtfilt(b, a, data)
 
         fs = 1 / dt
-        knee_velocity_filtered = lowpass_filter(knee_velocity, 10, fs)
-        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 10, fs)
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
 
         self.axes[1].plot(Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
         self.axes[1].plot(Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
