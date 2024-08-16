@@ -90,16 +90,6 @@ const float SCALE_FACTOR = 1000.0;
 
 // ################################################################# //
 void setup() {
-  IMUSerial1.begin(115200, SERIAL_8N1, IMU1_RX, IMU1_TX);
-  delay(10);
-  IMUSerial2.begin(115200, SERIAL_8N1, IMU2_RX, IMU2_TX);
-  delay(10);
-  IMUSerial3.begin(115200, SERIAL_8N1, IMU3_RX, IMU3_TX);
-  delay(10);
-
-  SPI.begin();
-  PMMG.init();
-
   pinMode(BUTTON, INPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BATTERY, INPUT);
@@ -117,7 +107,6 @@ void setup() {
   peerInfo.encrypt = false;
 
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    // Serial.println("Failed to add peer");
     return;
   }
 
@@ -129,67 +118,89 @@ void setup() {
 
   esp_timer_create(&timerArgs, &myTimer);
   esp_timer_start_periodic(myTimer, 5000);
-  // esp_timer_stop(myTimer);
 }
 // ################################################################# //
 
 // ################################################################# //
 //
 //                   ███████╗ ██████╗███╗   ███╗
-//                   ██╔════╝██╔════╝████╗░████║
-//                   █████╗░░╚█████╗░██╔████╔██║
-//                   ██╔══╝░░░╚═══██╗██║╚██╔╝██║
-//                   ██║░░░░░██████╔╝██║░╚═╝░██║
-//                   ╚═╝░░░░░╚═════╝░╚═╝░░░░░╚═╝
+//                   ██╔════╝██╔════╝████╗ ████║
+//                   █████╗  ╚█████╗ ██╔████╔██║
+//                   ██╔══╝   ╚═══██╗██║╚██╔╝██║
+//                   ██║     ██████╔╝██║ ╚═╝ ██║
+//                   ╚═╝     ╚═════╝ ╚═╝     ╚═╝
 
 void loop() {
+  // Step 1: Button Checking
+  button_is_pushed = button_check();
+
+  // Step 2: State Handling
+  switch (currentState) {
+    case IDLE:              handleIdle(); break;
+    case LOW_VOLTAGE:       handleLowVoltage(); break;
+    case PMMG_ERROR:        handlepmmgError(); break;
+    case IMUS_ERROR:        handleimusError(); break;
+    case STANDBY:           handleStandby(); break;
+    case LEG_ZEROING:       handleLegZeroing(); break;
+    case LEG_ZEROING_END:   handleLegZeroingEnd(); break;
+    case READ_SENSORS:      handleReadSensors(); break;
+    case READ_SENSORS_END:  handleReadSensorsEnd(); break;
+    case MAG_CALIBRATION:   handleMagCalibration(); break;
+  }
+
+  // Step 3: Sensor Data Processing (conditional on processDataFlag)
   if (processDataFlag) {
     processDataFlag = false;
+
     bool newData = true;
-    newData &= (PMMG.read(8) == 0);  // 센서 데이터 읽기 시도
-    newData &= updateQuaternion(IMUSerial1, quat_imu1);
-    newData &= updateQuaternion(IMUSerial2, quat_imu2);
-    newData &= updateQuaternion(IMUSerial3, quat_imu3);
+    bool pmmgSuccess = (PMMG.read(8) == 0);
+    bool imu1Success = updateQuaternion(IMUSerial1, quat_imu1);
+    bool imu2Success = updateQuaternion(IMUSerial2, quat_imu2);
+    bool imu3Success = updateQuaternion(IMUSerial3, quat_imu3);
 
-    if (newData) {
-      myData.d_pmmg = PMMG.getPressure() * 0.001;
-      if (myData.d_pmmg > 150) {
-        nextState = ERROR;
-        storeMsg(ERROR_SENSOR_MALFUNC);
-      } else {
-        if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
-          storeData();
-          sendData_espnow();
-        }
-      }
-    }
+    newData &= pmmgSuccess;
+    newData &= imu1Success;
+    newData &= imu2Success;
+    newData &= imu3Success;
 
-    button_is_pushed = button_check();
-    switch (currentState) {
-      case IDLE:              handleIdle(); break;
-      case LOW_VOLTAGE:       handleLowVoltage(); break;
-      case PMMG_ERROR:        handlepmmgError(); break;
-      case IMUS_ERROR:        handleimusError(); break;
-      case STANDBY:           handleStandby(); break;
-      case LEG_ZEROING:       handleLegZeroing(); break;
-      case LEG_ZEROING_END:   handleLegZeroingEnd(); break;
-      case READ_SENSORS:      handleReadSensors(); break;
-      case READ_SENSORS_END:  handleReadSensorsEnd(); break;
-      case MAG_CALIBRATION:   handleMagCalibration(); break;
+    // Handle different outcomes based on sensor data
+    if (!pmmgSuccess || PMMG.getPressure() * 0.001 > 150) {
+        nextState = PMMG_ERROR;
+        storeMsg(ERROR_PMMG_MALFUNC);
+    } else if (!imu1Success || !imu2Success || !imu3Success) {
+        nextState = IMUS_ERROR;
+        storeMsg(ERROR_IMUS_MALFUNC);
+    } else if (newData) {
+        myData.d_pmmg = PMMG.getPressure() * 0.001;
+        // if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
+        storeData();
+        sendData_espnow();
+        //}
     }
+  }
 
-    if (nextState != currentState) {
-      currentState = nextState;
-      if (nextState == LEG_ZEROING_END || nextState == READ_SENSORS_END) {
-        // Introduce a short delay to ensure all data is sent
-        delay(300);  // Adjust this delay as needed based on your system's timing
-      }
-      sendData_espnow();
+  // Step 4: State Transition
+  if (nextState != currentState) {
+    currentState = nextState;
+    if (nextState == LEG_ZEROING_END || nextState == READ_SENSORS_END) {
+      // Optional delay to ensure data is sent before state transition
+      delay(200);
     }
+    sendData_espnow();  // Send state change message
   }
 }
 
 void handleIdle() {
+  esp_timer_stop(myTimer);
+
+  IMUSerial1.begin(115200, SERIAL_8N1, IMU1_RX, IMU1_TX);
+  IMUSerial2.begin(115200, SERIAL_8N1, IMU2_RX, IMU2_TX);
+  IMUSerial3.begin(115200, SERIAL_8N1, IMU3_RX, IMU3_TX);
+  SPI.begin();
+  PMMG.init();
+
+  esp_timer_start_periodic(myTimer, 5000);
+
   nextState = (analogRead(BATTERY) < battery_threshold) ? LOW_VOLTAGE : STANDBY;
   storeMsg(nextState == LOW_VOLTAGE ? ERROR_LOW_VOLTAGE : MSG_STATE_IS_STANDBY);
 }
@@ -198,15 +209,13 @@ void handleLowVoltage() {}
 
 void handlepmmgError() {
   if (button_is_pushed) {
-    nextState = LEG_ZEROING_END;
-    storeMsg(MSG_ZEROING_STOPPED);
+    nextState = IDLE;
   }  
 }
 
 void handleimusError() {
   if (button_is_pushed) {
-    nextState = LEG_ZEROING_END;
-    storeMsg(MSG_ZEROING_STOPPED);
+    nextState = IDLE;
   }
 }
 
@@ -252,8 +261,6 @@ void handleReadSensors() {
 }
 
 void handleReadSensorsEnd() {
-  // nextState = STANDBY;
-  // storeMsg(MSG_STATE_IS_STANDBY);
   static unsigned long buttonPressTime = 0;
 
   if (button_is_pushed) {
@@ -292,8 +299,8 @@ void handleMagCalibration() {
     nextState = STANDBY;
     storeMsg(MSG_STATE_IS_STANDBY);
   } else {
-    nextState = ERROR;
-    storeMsg(ERROR_SENSOR_MALFUNC);
+    nextState = IMUS_ERROR;
+    storeMsg(ERROR_IMUS_MALFUNC);
   }
 }
 
@@ -315,11 +322,11 @@ bool waitForCalibrationResponse(HardwareSerial& serial) {
 // ################################################################# //
 //
 //               ██╗       ██╗██╗      ███████╗██╗
-//              ░██║░░██╗░░██║██║░░░░░░██╔════╝██║
-//              ░╚██╗████╗██╔╝██║█████╗█████╗░░██║
-//              ░░████╔═████║░██║╚════╝██╔══╝░░██║
-//              ░░╚██╔╝░╚██╔╝░██║░░░░░░██║░░░░░██║
-//              ░░░╚═╝░░░╚═╝░░╚═╝░░░░░░╚═╝░░░░░╚═╝
+//               ██║  ██╗  ██║██║      ██╔════╝██║
+//               ╚██╗████╗██╔╝██║█████╗█████╗  ██║
+//                ████╔═████║ ██║╚════╝██╔══╝  ██║
+//                ╚██╔╝ ╚██╔╝ ██║      ██║     ██║
+//                 ╚═╝   ╚═╝  ╚═╝      ╚═╝     ╚═╝
 
 void sendData_espnow() {
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*)&myData, sizeof(myData));
@@ -364,15 +371,16 @@ void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
 
 // ################################################################# //
 //          ██████╗███████╗███╗  ██╗ ██████╗ █████╗ ██████╗
-//         ██╔════╝██╔════╝████╗░██║██╔════╝██╔══██╗██╔══██╗
-//         ╚█████╗░█████╗░░██╔██╗██║╚█████╗░██║░░██║██████╔╝
-//         ░╚═══██╗██╔══╝░░██║╚████║░╚═══██╗██║░░██║██╔══██╗
-//         ██████╔╝███████╗██║░╚███║██████╔╝╚█████╔╝██║░░██║
-//         ╚═════╝░╚══════╝╚═╝░░╚══╝╚═════╝░░╚════╝░╚═╝░░╚═╝
+//         ██╔════╝██╔════╝████╗ ██║██╔════╝██╔══██╗██╔══██╗
+//         ╚█████╗ █████╗  ██╔██╗██║╚█████╗ ██║  ██║██████╔╝
+//          ╚═══██╗██╔══╝  ██║╚████║ ╚═══██╗██║  ██║██╔══██╗
+//         ██████╔╝███████╗██║ ╚███║██████╔╝╚█████╔╝██║  ██║
+//         ╚═════╝ ╚══════╝╚═╝  ╚══╝╚═════╝  ╚════╝ ╚═╝  ╚═╝
 
 void IRAM_ATTR onTimer(void* arg) {
-  processDataFlag = true;
-  // processData();
+  if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
+    processDataFlag = true;
+  }
 }
 
 bool updateQuaternion(HardwareSerial& serial, Quaternion& quat) {
@@ -383,7 +391,7 @@ bool updateQuaternion(HardwareSerial& serial, Quaternion& quat) {
       return true;
     }
   }
-  return false;
+  return true;
 }
 
 Quaternion readIMUSerial(HardwareSerial& serial) {
@@ -432,7 +440,7 @@ bool button_check() {
   int reading = digitalRead(BUTTON);
 
   if (reading != button_old) {
-    lastDebounceTime = millis();  // 디바운싱 타이머 재설정
+    lastDebounceTime = millis();
   }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
