@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import serial
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout, QFileDialog, QCheckBox
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QHBoxLayout, QFileDialog, QCheckBox, QFormLayout
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from screeninfo import get_monitors
 
@@ -49,9 +49,10 @@ class SerialReader(QThread):
     state_changed = pyqtSignal(str)
     initial_angles_calculated = pyqtSignal(float, float)
 
-    def __init__(self, filename, parent=None):
+    def __init__(self, filename, header_info, parent=None):
         super().__init__(parent)
         self.file_handler = FileHandler(filename)
+        self.header_info = header_info
         self.filename = filename
         self.running = False
         self.collecting = False
@@ -100,7 +101,8 @@ class SerialReader(QThread):
                             'q_si': self.q_si,
                             'q_fi': self.q_fi,
                             'initial_knee_angle': self.initial_knee_angle,
-                            'initial_ankle_angle': self.initial_ankle_angle
+                            'initial_ankle_angle': self.initial_ankle_angle,
+                            **self.header_info  # Add patient info to header
                         }
                         self.file_handler.open_new_file(header_data)
                         self.collecting = True
@@ -140,7 +142,8 @@ class SerialReader(QThread):
             'q_si': self.q_si,
             'q_fi': self.q_fi,
             'initial_knee_angle': self.initial_knee_angle,
-            'initial_ankle_angle': self.initial_ankle_angle
+            'initial_ankle_angle': self.initial_ankle_angle,
+            **self.header_info  # Add patient info to header
         }
         self.file_handler.open_new_file(header_data)
 
@@ -244,37 +247,60 @@ class SerialDataSaver(QWidget):
         plt.rcParams['axes.labelsize'] = base_font_size_px * 0.6 * scale_factor
         plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
         plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
-        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.8 * scale_factor)
+        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.6 * scale_factor)
 
         self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
 
-        layout = QVBoxLayout()
-        base_font_size = int(min(screen_width, screen_height) * 0.015)
+        layout = QHBoxLayout()  # Main layout for the entire window
+
+        # Left side for plots
+        plot_layout = QVBoxLayout()
         self.fig = plt.figure(figsize=(15, 15))
         self.canvas = FigureCanvas(self.fig)
-        layout.addWidget(self.canvas)
+        plot_layout.addWidget(self.canvas)
 
         self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
 
+        layout.addLayout(plot_layout, 2)  # Allocate 60% to 70% of width for plots
+
+        # Right side for user inputs and controls
+        control_layout = QVBoxLayout()
+
+        # Status label
         self.status_label = QLabel("Status: None")
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet(f"font-size: {int(base_font_size_px*1.2)}px; font-weight: bold;")
-        layout.addWidget(self.status_label)  
+        self.status_label.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px; font-weight: bold;")
+        control_layout.addWidget(self.status_label)  
 
+        # Initial angles label
         self.initial_angles_label = QLabel("Initial Angles: Not calculated")
         self.initial_angles_label.setAlignment(Qt.AlignCenter)
         self.initial_angles_label.setStyleSheet(f"font-size: {base_font_size_px}px; font-weight: bold;")
-        layout.addWidget(self.initial_angles_label)
+        control_layout.addWidget(self.initial_angles_label)
 
-        instruction_label = QLabel("Enter the output trial name:")
-        instruction_label.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        layout.addWidget(instruction_label)
-
+        # Patient information inputs
+        patient_info_layout = QFormLayout()
         self.filename_input = QLineEdit(self)
         self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        layout.addWidget(self.filename_input)
+        patient_info_layout.addRow("Trial Name:", self.filename_input)
 
-        buttons_layout = QHBoxLayout()
+        self.patient_leg_thickness_input = QLineEdit(self)
+        self.patient_leg_thickness_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Leg Thickness (cm):", self.patient_leg_thickness_input)
+
+        self.initial_position_input = QLineEdit(self)
+        self.initial_position_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Initial Position:", self.initial_position_input)
+
+        self.recorder_name_input = QLineEdit(self)
+        self.recorder_name_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Recorder Name:", self.recorder_name_input)
+
+        control_layout.addLayout(patient_info_layout)
+
+        # Control buttons
+        buttons_layout = QVBoxLayout()
+
         self.start_btn = QPushButton('START', self)
         self.start_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
         self.start_btn.clicked.connect(self.start_reading)
@@ -295,7 +321,9 @@ class SerialDataSaver(QWidget):
         self.save_plot_btn.clicked.connect(self.save_plot)
         buttons_layout.addWidget(self.save_plot_btn)
 
-        layout.addLayout(buttons_layout)
+        control_layout.addLayout(buttons_layout)
+        layout.addLayout(control_layout, 1)  # Allocate 30% to 40% of width for controls
+
         self.setLayout(layout)
         self.setWindowTitle('Spasticity Measurement Software')
         self.show()
@@ -303,13 +331,24 @@ class SerialDataSaver(QWidget):
     def start_reading(self):
         """Start the serial reading thread."""
         filename = self.filename_input.text()
+        leg_thickness = self.patient_leg_thickness_input.text()
+        initial_position = self.initial_position_input.text()
+        recorder_name = self.recorder_name_input.text()
+
         if not filename:
             return
 
         self.start_btn.setEnabled(False)
         self.filename_input.setEnabled(False)
 
-        self.thread = SerialReader(filename, self)
+        # Collect header info
+        header_info = {
+            "Leg Thickness (cm)": leg_thickness,
+            "Initial Position": initial_position,
+            "Recorder Name": recorder_name
+        }
+
+        self.thread = SerialReader(filename, header_info, self)
         self.thread.data_processed.connect(self.plot_data)
         self.thread.line_read.connect(self.handle_line_read)
         self.thread.state_changed.connect(self.update_status_label)
@@ -328,9 +367,15 @@ class SerialDataSaver(QWidget):
                     if not line:
                         break  # End of header
                     key, value_str = line.split('=')
-                    values = list(map(float, value_str.split(',')))
-                    header_data[key] = np.array(values) if len(values) > 1 else values[0]
-                
+                    
+                    # Try to convert the value to float(s), but if it fails, keep it as a string
+                    try:
+                        values = list(map(float, value_str.split(',')))
+                        header_data[key] = np.array(values) if len(values) > 1 else values[0]
+                    except ValueError:
+                        # If the value cannot be converted to float, store it as a string
+                        header_data[key] = value_str
+
                 q_ti = header_data.get('q_ti')
                 q_si = header_data.get('q_si')
                 q_fi = header_data.get('q_fi')
@@ -370,19 +415,20 @@ class SerialDataSaver(QWidget):
         self.axes[0].legend()
         self.axes[0].grid(True)
 
-        dt = np.diff(Time_sec)
+        # dt = np.diff(Time_sec)
+        dt = 0.005
         knee_velocity = np.diff(knee_angle) / dt
         ankle_velocity = np.diff(ankle_angle) / dt
 
-        def lowpass_filter(data, cutoff_freq, fs, order=2):
+        def lowpass_filter(data, cutoff_freq, fs, order=5):
             nyquist_freq = 0.5 * fs
             normal_cutoff = cutoff_freq / nyquist_freq
             b, a = butter(order, normal_cutoff, btype='low', analog=False)
             return filtfilt(b, a, data)
 
-        fs = 1 / np.mean(dt)
-        knee_velocity_filtered = lowpass_filter(knee_velocity, 20, fs)
-        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 20, fs)
+        fs = 1 / dt
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 10, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 10, fs)
 
         self.axes[1].plot(Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
         self.axes[1].plot(Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
@@ -416,7 +462,8 @@ class SerialDataSaver(QWidget):
             "105": "Reading stopped",
             "106": "Magnetometer calibrating",
             "201": "ERROR - Low voltage",
-            "202": "ERROR - Sensor malfunction"
+            "202": "ERROR - pMMG malfunction",
+            "203": "ERROR - IMUs malfunction"
         }
         status_message = status_mapping.get(status_code, "ERROR - ???")
         self.status_label.setText(f"Status: {status_message}")
