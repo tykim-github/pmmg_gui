@@ -295,11 +295,6 @@ class SerialDataSaver(QWidget):
         self.save_plot_btn.clicked.connect(self.save_plot)
         buttons_layout.addWidget(self.save_plot_btn)
 
-        self.toggle_view_btn = QCheckBox('Toggle Plot View', self)
-        self.toggle_view_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
-        self.toggle_view_btn.stateChanged.connect(self.toggle_plot_view)
-        buttons_layout.addWidget(self.toggle_view_btn)
-
         layout.addLayout(buttons_layout)
         self.setLayout(layout)
         self.setWindowTitle('Spasticity Measurement Software')
@@ -386,8 +381,8 @@ class SerialDataSaver(QWidget):
             return filtfilt(b, a, data)
 
         fs = 1 / np.mean(dt)
-        knee_velocity_filtered = lowpass_filter(knee_velocity, 50, fs)
-        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 50, fs)
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 20, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 20, fs)
 
         self.axes[1].plot(Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
         self.axes[1].plot(Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
@@ -410,16 +405,6 @@ class SerialDataSaver(QWidget):
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Plot", "", "PNG Files (*.png);;All Files (*)", options=options)
         if file_name:
             self.fig.savefig(file_name)
-
-    def toggle_plot_view(self, state):
-        """Toggle between different plot views."""
-        if state == Qt.Checked:
-            for ax in self.axes:
-                ax.set_facecolor('lightgray')
-        else:
-            for ax in self.axes:
-                ax.set_facecolor('white')
-        self.canvas.draw()
 
     def update_status_label(self, status_code):
         """Update the status label based on the status code."""
