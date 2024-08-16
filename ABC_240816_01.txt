@@ -6,7 +6,7 @@ initial_ankle_angle=-30.0
 Leg Thickness (cm)=22
 Initial Knee Angle (deg)=90.0
 Initial Ankle Angle (deg)=-30.0
-Recorder Name=Taeyeon Kim
+Recorder Name=Taeyeon
 
 0,6,-0.91,-0.04,-0.01,-0.41,0.55,0.01,-0.01,-0.83,-0.68,-0.01,0.00,-0.73,100.58
 0,11,-0.91,-0.04,-0.01,-0.41,0.55,0.01,-0.01,-0.83,-0.68,-0.01,0.00,-0.73,100.60
