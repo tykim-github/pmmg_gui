@@ -291,9 +291,13 @@ class SerialDataSaver(QWidget):
         self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
         patient_info_layout.addRow("Trial Name:", self.filename_input)
 
-        self.patient_leg_thickness_input = QLineEdit(self)
-        self.patient_leg_thickness_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Leg Thickness (cm):", self.patient_leg_thickness_input)
+        self.patient_shank_diameter_input = QLineEdit(self)
+        self.patient_shank_diameter_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_diameter_input)
+
+        self.patient_band_elongation_input = QLineEdit(self)
+        self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+        patient_info_layout.addRow("Elongated Band Length (mm):", self.patient_band_elongation_input)
 
         self.initial_knee_angle_input = QLineEdit(self)
         self.initial_knee_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
@@ -342,7 +346,8 @@ class SerialDataSaver(QWidget):
     def start_reading(self):
         """Start the serial reading thread."""
         filename = self.filename_input.text()
-        leg_thickness = self.patient_leg_thickness_input.text()
+        shank_diameter = self.patient_shank_diameter_input.text()
+        band_elongation = self.patient_band_elongation_input.text()
 
         # GUI에서 입력된 초기 각도 값을 가져옵니다.
         initial_knee_angle = float(self.initial_knee_angle_input.text())
@@ -358,7 +363,8 @@ class SerialDataSaver(QWidget):
 
         # header_info에 초기 각도 값을 저장합니다.
         header_info = {
-            "Leg Thickness (cm)": leg_thickness,
+            "Shank Diameter (mm)": shank_diameter,
+            "Elongated Band Length(mm)": band_elongation,
             "Initial Knee Angle (deg)": initial_knee_angle,
             "Initial Ankle Angle (deg)": initial_ankle_angle,
             "Recorder Name": recorder_name
