@@ -1,10 +1,11 @@
 import os
 import sys
+import traceback
 import numpy as np
 import serial
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QHBoxLayout, QFileDialog, 
-                             QCheckBox, QFormLayout)
+                             QCheckBox, QFormLayout, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QPixmap
 from screeninfo import get_monitors
@@ -126,15 +127,22 @@ class SerialReader(QThread):
     def run(self):
         """Main loop for reading serial data."""
         self.running = True
+        self.com_port = None
+
         for port in serial.tools.list_ports.comports():
             if "wch.cn" in port.manufacturer:
                 self.com_port = port.device
-        
+                break  # USB 포트를 찾으면 루프를 종료합니다.
+
+        if self.com_port is None:
+            self.state_changed.emit("SerialFail")
+            return  # 메서드를 종료하여 더 이상 코드를 실행하지 않도록 합니다.
+
         try:
             ser = serial.Serial(self.com_port, 115200, timeout=1)
         except serial.SerialException as e:
-            self.state_changed.emit("ERROR - Serial Port Failure")
-            return
+            self.state_changed.emit("SerialFail")
+            return  # 메서드를 종료하여 더 이상 코드를 실행하지 않도록 합니다.
 
         try:
             while self.running:
@@ -177,7 +185,8 @@ class SerialReader(QThread):
                             self.file_handler.write_line(line)
         finally:
             self.file_handler.close_file()
-            ser.close()
+            if ser.is_open:
+                ser.close()
 
     def stop(self):
         """Stop the serial reading thread."""
@@ -220,198 +229,221 @@ class SerialDataSaver(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        """Initialize the user interface."""
-        monitor = get_monitors()[0]
-        screen_width = monitor.width
-        screen_height = monitor.height
+        try:
+            """Initialize the user interface."""
+            monitor = get_monitors()[0]
+            screen_width = monitor.width
+            screen_height = monitor.height
+            
+            screen = QApplication.primaryScreen()
+            qt_dpi = screen.physicalDotsPerInch()
+
+            diagonal_in_inches = (monitor.width_mm**2 + monitor.height_mm**2)**0.5 / 25.4
+            base_font_size_inch = diagonal_in_inches * 0.007
+            base_font_size_px = int(base_font_size_inch * qt_dpi)
+
+            plt.rcParams['figure.dpi'] = qt_dpi
+            scale_factor = 96 / qt_dpi
+            plt.rcParams['font.size'] = base_font_size_px * scale_factor
+            plt.rcParams['axes.labelsize'] = base_font_size_px * 0.6 * scale_factor
+            plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
+            plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
+            plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.6 * scale_factor)
+
+            self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
+
+            layout = QHBoxLayout()  # Main layout for the entire window
+
+            # Left side for plots
+            plot_layout = QVBoxLayout()
+            self.fig = plt.figure(figsize=(15, 15))
+            self.canvas = FigureCanvas(self.fig)
+            plot_layout.addWidget(self.canvas)
+
+            # Add the navigation toolbar
+            self.toolbar = NavigationToolbar(self.canvas, self)
+            plot_layout.addWidget(self.toolbar)  # Add toolbar below the plot
+
+            self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
+
+            layout.addLayout(plot_layout, 2)  # Allocate 60% to 70% of width for plots
+
+            # Right side for user inputs and controls
+            control_layout = QVBoxLayout()
+
+            # Status label
+            self.status_label = QLabel("Status: None")
+            self.status_label.setAlignment(Qt.AlignCenter)
+            self.status_label.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px; font-weight: bold;")
+            control_layout.addWidget(self.status_label)  
+
+            # Add image between status label and input fields
+            self.image_label = QLabel(self)
+            # 실행 파일 내부에서 이미지 경로를 찾기 위해서 다음과 같이 수정
+            if hasattr(sys, '_MEIPASS'):
+                # PyInstaller로 패키징된 경우 실행 디렉토리 경로 설정
+                image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
+            else:
+                # 일반적인 실행 환경에서 이미지 경로 설정
+                image_path = "joint_angle_definition.png"
+
+            pixmap = QPixmap(image_path)
+            max_image_width = int(screen_width * 0.3)
+            max_image_height = int(screen_height * 0.3)
+            scaled_pixmap = pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled_pixmap)
+            self.image_label.setAlignment(Qt.AlignCenter)
+            control_layout.addWidget(self.image_label)
+
+            # Patient information inputs
+            patient_info_layout = QFormLayout()
+            self.filename_input = QLineEdit(self)
+            self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Trial Name:", self.filename_input)
+
+            self.patient_shank_diameter_input = QLineEdit(self)
+            self.patient_shank_diameter_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_diameter_input)
+
+            self.patient_band_elongation_input = QLineEdit(self)
+            self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Elongated Band Length (mm):", self.patient_band_elongation_input)
+
+            self.initial_knee_angle_input = QLineEdit(self)
+            self.initial_knee_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Initial Knee Angle (deg):", self.initial_knee_angle_input)
+
+            self.initial_ankle_angle_input = QLineEdit(self)
+            self.initial_ankle_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Initial Ankle Angle (deg):", self.initial_ankle_angle_input)
+
+            self.recorder_name_input = QLineEdit(self)
+            self.recorder_name_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Recorder Name:", self.recorder_name_input)
+
+            control_layout.addLayout(patient_info_layout)
+
+            # Control buttons
+            buttons_layout = QVBoxLayout()
+
+            self.start_btn = QPushButton('START', self)
+            self.start_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            self.start_btn.clicked.connect(self.start_reading)
+            buttons_layout.addWidget(self.start_btn)
+
+            end_btn = QPushButton('END', self)
+            end_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            end_btn.clicked.connect(self.close_app)
+            buttons_layout.addWidget(end_btn)
+
+            load_btn = QPushButton('LOAD DATA', self)
+            load_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            load_btn.clicked.connect(self.load_data)
+            buttons_layout.addWidget(load_btn)
+
+            self.save_plot_btn = QPushButton('SAVE PLOT', self)
+            self.save_plot_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            self.save_plot_btn.clicked.connect(self.save_plot)
+            buttons_layout.addWidget(self.save_plot_btn)
+
+            control_layout.addLayout(buttons_layout)
+            layout.addLayout(control_layout, 1)  # Allocate 30% to 40% of width for controls
+
+            self.setLayout(layout)
+            self.setWindowTitle('Spasticity Measurement Software')
+            self.show()
+        except Exception as e:
+            self.handle_exception(e)
         
-        screen = QApplication.primaryScreen()
-        qt_dpi = screen.physicalDotsPerInch()
+    def handle_exception(self, e):
+        """오류 발생 시 호출되어 오류 내용을 로그 파일에 기록하고 메시지 박스로 표시합니다."""
+        # 예외 내용을 로그 파일에 기록
+        with open("error_log.txt", "a") as f:
+            traceback.print_exc(file=f)
 
-        diagonal_in_inches = (monitor.width_mm**2 + monitor.height_mm**2)**0.5 / 25.4
-        base_font_size_inch = diagonal_in_inches * 0.007
-        base_font_size_px = int(base_font_size_inch * qt_dpi)
-
-        plt.rcParams['figure.dpi'] = qt_dpi
-        scale_factor = 96 / qt_dpi
-        plt.rcParams['font.size'] = base_font_size_px * scale_factor
-        plt.rcParams['axes.labelsize'] = base_font_size_px * 0.6 * scale_factor
-        plt.rcParams['xtick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
-        plt.rcParams['ytick.labelsize'] = int(base_font_size_px * 0.6 * scale_factor)
-        plt.rcParams['legend.fontsize'] = int(base_font_size_px * 0.6 * scale_factor)
-
-        self.setGeometry(int(screen_width * 0.15), int(screen_height * 0.1), int(screen_width * 0.7), int(screen_height * 0.8))
-
-        layout = QHBoxLayout()  # Main layout for the entire window
-
-        # Left side for plots
-        plot_layout = QVBoxLayout()
-        self.fig = plt.figure(figsize=(15, 15))
-        self.canvas = FigureCanvas(self.fig)
-        plot_layout.addWidget(self.canvas)
-
-        # Add the navigation toolbar
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        plot_layout.addWidget(self.toolbar)  # Add toolbar below the plot
-
-        self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
-
-        layout.addLayout(plot_layout, 2)  # Allocate 60% to 70% of width for plots
-
-        # Right side for user inputs and controls
-        control_layout = QVBoxLayout()
-
-        # Status label
-        self.status_label = QLabel("Status: None")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px; font-weight: bold;")
-        control_layout.addWidget(self.status_label)  
-
-       # Add image between status label and input fields
-        self.image_label = QLabel(self)
-        # 실행 파일 내부에서 이미지 경로를 찾기 위해서 다음과 같이 수정
-        if hasattr(sys, '_MEIPASS'):
-            # PyInstaller로 패키징된 경우 실행 디렉토리 경로 설정
-            image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
-        else:
-            # 일반적인 실행 환경에서 이미지 경로 설정
-            image_path = "joint_angle_definition.png"
-
-        pixmap = QPixmap(image_path)
-        max_image_width = int(screen_width * 0.3)
-        max_image_height = int(screen_height * 0.3)
-        scaled_pixmap = pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.image_label.setPixmap(scaled_pixmap)
-        self.image_label.setAlignment(Qt.AlignCenter)
-        control_layout.addWidget(self.image_label)
-
-        # Patient information inputs
-        patient_info_layout = QFormLayout()
-        self.filename_input = QLineEdit(self)
-        self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Trial Name:", self.filename_input)
-
-        self.patient_shank_diameter_input = QLineEdit(self)
-        self.patient_shank_diameter_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_diameter_input)
-
-        self.patient_band_elongation_input = QLineEdit(self)
-        self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Elongated Band Length (mm):", self.patient_band_elongation_input)
-
-        self.initial_knee_angle_input = QLineEdit(self)
-        self.initial_knee_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Initial Knee Angle (deg):", self.initial_knee_angle_input)
-
-        self.initial_ankle_angle_input = QLineEdit(self)
-        self.initial_ankle_angle_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Initial Ankle Angle (deg):", self.initial_ankle_angle_input)
-
-        self.recorder_name_input = QLineEdit(self)
-        self.recorder_name_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-        patient_info_layout.addRow("Recorder Name:", self.recorder_name_input)
-
-        control_layout.addLayout(patient_info_layout)
-
-        # Control buttons
-        buttons_layout = QVBoxLayout()
-
-        self.start_btn = QPushButton('START', self)
-        self.start_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
-        self.start_btn.clicked.connect(self.start_reading)
-        buttons_layout.addWidget(self.start_btn)
-
-        end_btn = QPushButton('END', self)
-        end_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
-        end_btn.clicked.connect(self.close_app)
-        buttons_layout.addWidget(end_btn)
-
-        load_btn = QPushButton('LOAD DATA', self)
-        load_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
-        load_btn.clicked.connect(self.load_data)
-        buttons_layout.addWidget(load_btn)
-
-        self.save_plot_btn = QPushButton('SAVE PLOT', self)
-        self.save_plot_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
-        self.save_plot_btn.clicked.connect(self.save_plot)
-        buttons_layout.addWidget(self.save_plot_btn)
-
-        control_layout.addLayout(buttons_layout)
-        layout.addLayout(control_layout, 1)  # Allocate 30% to 40% of width for controls
-
-        self.setLayout(layout)
-        self.setWindowTitle('Spasticity Measurement Software')
-        self.show()
+        # 오류 메시지를 사용자에게 표시
+        error_message = f"An error occurred: {str(e)}"
+        QMessageBox.critical(self, "Error", error_message)
 
     def start_reading(self):
-        """Start the serial reading thread."""
-        filename = self.filename_input.text()
-        shank_diameter = self.patient_shank_diameter_input.text()
-        band_elongation = self.patient_band_elongation_input.text()
+        try:
+            """Start the serial reading thread."""
+            filename = self.filename_input.text()
+            shank_diameter = self.patient_shank_diameter_input.text()
+            band_elongation = self.patient_band_elongation_input.text()
 
-        # GUI에서 입력된 초기 각도 값을 가져옵니다.
-        initial_knee_angle = float(self.initial_knee_angle_input.text())
-        initial_ankle_angle = float(self.initial_ankle_angle_input.text())
+            # GUI에서 입력된 초기 각도 값을 가져옵니다.
+            initial_knee_angle = float(self.initial_knee_angle_input.text())
+            initial_ankle_angle = float(self.initial_ankle_angle_input.text())
 
-        recorder_name = self.recorder_name_input.text()
+            recorder_name = self.recorder_name_input.text()
 
-        if not filename:
-            return
+            if not filename:
+                return
 
-        self.start_btn.setEnabled(False)
-        self.filename_input.setEnabled(False)
+            self.start_btn.setEnabled(False)
+            self.filename_input.setEnabled(False)
 
-        # header_info에 초기 각도 값을 저장합니다.
-        header_info = {
-            "Shank Diameter (mm)": shank_diameter,
-            "Elongated Band Length(mm)": band_elongation,
-            "Initial Knee Angle (deg)": initial_knee_angle,
-            "Initial Ankle Angle (deg)": initial_ankle_angle,
-            "Recorder Name": recorder_name
-        }
+            # header_info에 초기 각도 값을 저장합니다.
+            header_info = {
+                "Shank Diameter (mm)": shank_diameter,
+                "Elongated Band Length(mm)": band_elongation,
+                "Initial Knee Angle (deg)": initial_knee_angle,
+                "Initial Ankle Angle (deg)": initial_ankle_angle,
+                "Recorder Name": recorder_name
+            }
 
-        self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
+            self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
 
-        # 쓰레드 시작
-        self.thread = SerialReader(filename, header_info, self.processor, self)
-        self.thread.data_processed.connect(self.plot_data)
-        self.thread.line_read.connect(self.handle_line_read)
-        self.thread.state_changed.connect(self.update_status_label)
-        self.thread.initial_angles_calculated.connect(self.display_initial_angles)
-        self.thread.start()
+            # 쓰레드 시작
+            self.thread = SerialReader(filename, header_info, self.processor, self)
+            self.thread.data_processed.connect(self.plot_data)
+            self.thread.line_read.connect(self.handle_line_read)
+            self.thread.state_changed.connect(self.update_status_label)
+            self.thread.initial_angles_calculated.connect(self.display_initial_angles)
+            self.thread.finished.connect(self.on_thread_finished)
+            self.thread.start()
+
+        except Exception as e:
+            self.handle_exception(e)
+
 
     def load_data(self):
-        """Load data from a file."""
-        options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
-        if file_name:
-            header_data = {}
-            
-            # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
-            with open(file_name, 'r') as file:
-                for line in file:
-                    line = line.strip()
-                    if not line:
-                        break  # End of header
-                    key, value_str = line.split('=')
-                    
-                    # Try to convert the value to float(s), but if it fails, keep it as a string
-                    try:
-                        values = list(map(float, value_str.split(',')))
-                        header_data[key] = np.array(values) if len(values) > 1 else values[0]
-                    except ValueError:
-                        # If the value cannot be converted to float, store it as a string
-                        header_data[key] = value_str
+        try:
+            """Load data from a file."""
+            options = QFileDialog.Options()
+            file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
+            if file_name:
+                header_data = {}
+                
+                # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
+                with open(file_name, 'r') as file:
+                    for line in file:
+                        line = line.strip()
+                        if not line:
+                            break  # End of header
+                        key, value_str = line.split('=')
+                        
+                        # Try to convert the value to float(s), but if it fails, keep it as a string
+                        try:
+                            values = list(map(float, value_str.split(',')))
+                            header_data[key] = np.array(values) if len(values) > 1 else values[0]
+                        except ValueError:
+                            # If the value cannot be converted to float, store it as a string
+                            header_data[key] = value_str
 
-            # DataProcessor 인스턴스를 초기화하고 헤더 정보를 로드합니다.
-            self.processor.initialize_from_header(header_data)
+                # DataProcessor 인스턴스를 초기화하고 헤더 정보를 로드합니다.
+                self.processor.initialize_from_header(header_data)
 
-            # 두 번째로 파일을 열어 데이터를 읽습니다.
-            data = np.loadtxt(file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
+                # 두 번째로 파일을 열어 데이터를 읽습니다.
+                data = np.loadtxt(file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
 
-            # 데이터를 처리하고 플롯을 그립니다.
-            Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-            self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+                # 데이터를 처리하고 플롯을 그립니다.
+                Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+        except Exception as e:
+            self.handle_exception(e)
+
 
     def plot_data(self, Time, Quaternions, Pressure, knee_angle, ankle_angle):
         """Plot the processed data."""
@@ -457,11 +489,15 @@ class SerialDataSaver(QWidget):
         self.canvas.draw()
 
     def save_plot(self):
-        """Save the current plot to a file."""
-        options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Plot", "", "PNG Files (*.png);;All Files (*)", options=options)
-        if file_name:
-            self.fig.savefig(file_name)
+        try:
+            """Save the current plot to a file."""
+            options = QFileDialog.Options()
+            file_name, _ = QFileDialog.getSaveFileName(self, "Save Plot", "", "PNG Files (*.png);;All Files (*)", options=options)
+            if file_name:
+                self.fig.savefig(file_name)
+
+        except Exception as e:
+            self.handle_exception(e)
 
     def update_status_label(self, status_code):
         """Update the status label based on the status code."""
@@ -474,10 +510,16 @@ class SerialDataSaver(QWidget):
             "106": "Magnetometer calibrating",
             "201": "ERROR - Low voltage",
             "202": "ERROR - pMMG malfunction",
-            "203": "ERROR - IMUs malfunction"
+            "203": "ERROR - IMUs malfunction",
+            "SerialFail": "ERROR - USB포트 연결없음",
         }
         status_message = status_mapping.get(status_code, "ERROR - ???")
         self.status_label.setText(f"Status: {status_message}")
+
+    def on_thread_finished(self):
+        """Reset the UI after the thread finishes."""
+        self.start_btn.setEnabled(True)
+        self.filename_input.setEnabled(True)
 
     def handle_line_read(self, line):
         """Handle a line read from the serial port."""
@@ -488,15 +530,29 @@ class SerialDataSaver(QWidget):
         self.initial_angles_label.setText(f"Initial Knee Angle: {knee_angle:.2f} degrees, Initial Ankle Angle: {ankle_angle:.2f} degrees")
 
     def close_app(self):
-        """Close the application and stop the thread."""
-        if self.thread and self.thread.isRunning():
-            self.thread.stop()
-            self.thread.wait()
-        self.start_btn.setEnabled(True)
-        self.filename_input.setEnabled(True)
+        try:
+            """Close the application and stop the thread."""
+            if self.thread and self.thread.isRunning():
+                self.thread.stop()
+                self.thread.wait()
+            self.start_btn.setEnabled(True)
+            self.filename_input.setEnabled(True)
+
+        except Exception as e:
+            self.handle_exception(e)
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = SerialDataSaver()
-    sys.exit(app.exec_())
+    try:
+        app = QApplication(sys.argv)
+        window = SerialDataSaver()
+        sys.exit(app.exec_())
+
+    except Exception as e:
+        # 마지막 예외 처리
+        with open("error_log.txt", "a") as f:
+            traceback.print_exc(file=f)
+
+        error_message = f"An unexpected error occurred: {str(e)}"
+        QMessageBox.critical(None, "Critical Error", error_message)
+        sys.exit(1)
