@@ -21,7 +21,8 @@ import csv
 
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
-PROGRAM_VERSION = "1.02"
+
+PROGRAM_VERSION = "1.02.1"
 # 1.01 Initial release
 # 1.02 After 2 child patients
 
@@ -184,8 +185,8 @@ class SerialReader(QThread):
                         self.collecting = True
                     elif state == "105" and self.collecting:
                         data = np.array([list(map(float, x.split(','))) for x in self.processor.data_buffer])
-                        Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-                        self.data_processed.emit(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+                        Time, Quaternions, self.processor.Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+                        self.data_processed.emit(Time, Quaternions, self.processor.Pressure, knee_angle, ankle_angle)
                         self.collecting = False
                         self.file_handler.close_file()
                     elif self.collecting:
@@ -370,7 +371,7 @@ class SerialDataSaver(QWidget):
             buttons_layout.addWidget(self.export_csv_btn)
 
             control_layout.addLayout(buttons_layout)
-            layout.addLayout(control_layout, 1)  # Allocate 30% to 40% of width for controls
+            layout.addLayout(control_layout, 1)
 
             self.setLayout(layout)
             self.setWindowTitle('Spasticity Measurement Software')
@@ -380,7 +381,6 @@ class SerialDataSaver(QWidget):
         
     def handle_exception(self, e):
         """오류 발생 시 호출되어 오류 내용을 로그 파일에 기록하고 메시지 박스로 표시합니다."""
-        # 예외 내용을 로그 파일에 기록
         with open("error_log.txt", "a") as f:
             traceback.print_exc(file=f)
 
@@ -391,14 +391,11 @@ class SerialDataSaver(QWidget):
     def start_reading(self):
         try:
             """Start the serial reading thread."""
-            self.file_name = self.filename_input.text()  # Changed from filename to file_name and made it an instance variable
+            self.file_name = self.filename_input.text()
             shank_diameter = self.patient_shank_diameter_input.text()
             band_elongation = self.patient_band_elongation_input.text()
-
-            # GUI에서 입력된 초기 각도 값을 가져옵니다.
             initial_knee_angle = float(self.initial_knee_angle_input.text())
             initial_ankle_angle = float(self.initial_ankle_angle_input.text())
-
             recorder_name = self.recorder_name_input.text()
 
             if not self.file_name:
@@ -407,7 +404,6 @@ class SerialDataSaver(QWidget):
             self.start_btn.setEnabled(False)
             self.filename_input.setEnabled(False)
 
-            # header_info에 초기 각도 값을 저장합니다.
             header_info = {
                 "Shank Diameter (mm)": shank_diameter,
                 "Elongated Band Length(mm)": band_elongation,
@@ -418,7 +414,6 @@ class SerialDataSaver(QWidget):
 
             self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
 
-            # 쓰레드 시작
             self.thread = SerialReader(self.file_name, header_info, self.processor, self)
             self.thread.data_processed.connect(self.plot_data)
             self.thread.line_read.connect(self.handle_line_read)
@@ -466,7 +461,7 @@ class SerialDataSaver(QWidget):
         except Exception as e:
             self.handle_exception(e)
 
-    def plot_data(self, Time, Pressure, knee_angle, ankle_angle):
+    def plot_data(self, Time, Quaternions, Pressure, knee_angle, ankle_angle):
         """Plot the processed data."""
         for ax in self.axes:
             ax.clear()
@@ -495,7 +490,7 @@ class SerialDataSaver(QWidget):
         self.axes[1].legend()
         self.axes[1].grid(True)
 
-        self.axes[2].plot(Time_sec, Pressure, color='black', label='pMMG')
+        self.axes[2].plot(Time_sec, self.processor.Pressure, color='black', label='pMMG')
         self.axes[2].set_xlabel("Time (sec)")
         self.axes[2].set_ylabel("Pressure (kPa)")
         self.axes[2].legend()
