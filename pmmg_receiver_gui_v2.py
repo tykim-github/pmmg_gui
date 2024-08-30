@@ -22,6 +22,8 @@ import csv
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 PROGRAM_VERSION = "1.02"
+# 1.01 Initial release
+# 1.02 After 2 child patients
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):

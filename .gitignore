@@ -4,6 +4,7 @@
 *.png
 *.spec
 *.ico
+*.csv
 
 # Ignore PyInstaller build directories
 /build/
