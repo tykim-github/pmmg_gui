@@ -158,7 +158,7 @@ void loop() {
     bool imu2Success = updateQuaternion(IMUSerial2, quat_imu2);
     bool imu3Success = updateQuaternion(IMUSerial3, quat_imu3);
 
-    newData &= pmmgSuccess;
+    newData &= pmmgSuccess;c:\Users\RSCLAB\Documents\spas_python\pmmg_gui\dist\pmmg_receiver_gui_v2.exe
     newData &= imu1Success;
     newData &= imu2Success;
     newData &= imu3Success;

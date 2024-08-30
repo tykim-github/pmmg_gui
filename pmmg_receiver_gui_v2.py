@@ -17,10 +17,11 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import serial.tools.list_ports
 from numpy.linalg import norm
 from scipy.signal import butter, filtfilt
+import csv
 
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
-
+PROGRAM_VERSION = "1.02"
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -30,6 +31,12 @@ class DataProcessor:
         self.q_si = None
         self.q_fi = None
         self.data_buffer = []
+
+        # Attributes to store processed data
+        self.Time = None
+        self.knee_angle = None
+        self.ankle_angle = None
+        self.Pressure = None
 
     def initialize_from_header(self, header_data):
         """헤더 데이터에서 초기 각도를 설정합니다."""
@@ -41,9 +48,9 @@ class DataProcessor:
 
     def process_data(self, data):
         """데이터를 처리하여 결과를 반환합니다."""
-        Time = data[:, 1]
+        self.Time = data[:, 1]  # Time을 객체 속성으로 저장
         Quaternions = data[:, 2:14]
-        Pressure = data[:, 14]
+        self.Pressure = data[:, 14]  # Pressure도 객체 속성으로 저장
         q_thigh = data[:, 2:6]
         q_shank = data[:, 6:10]
         q_foot = data[:, 10:14]
@@ -56,10 +63,10 @@ class DataProcessor:
                         Quaternion.mult(self.q_si, Quaternion.conj(q_shank[i])))
                         for i in range(len(data))])
 
-        knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle
-        ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle
+        self.knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle  # knee_angle 속성으로 저장
+        self.ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle  # ankle_angle 속성으로 저장
 
-        return Time, Quaternions, Pressure, knee_angle, ankle_angle
+        return self.Time, Quaternions, self.Pressure, self.knee_angle, self.ankle_angle
 
     def calculate_initial_state(self):
         """초기 상태를 계산하여 쿼터니언을 설정합니다."""
@@ -193,6 +200,12 @@ class SerialReader(QThread):
         self.running = False
 
 
+def lowpass_filter(data, cutoff_freq, fs, order=5):
+    nyquist_freq = 0.5 * fs
+    normal_cutoff = cutoff_freq / nyquist_freq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    return filtfilt(b, a, data)
+
 class Quaternion:
     @staticmethod
     def mult(q1, q2):
@@ -266,6 +279,12 @@ class SerialDataSaver(QWidget):
 
             self.axes = [self.fig.add_subplot(3, 1, i+1) for i in range(3)]
 
+            # Add version label below the plot
+            version_label = QLabel(f"Spasticity Measurement Software v{PROGRAM_VERSION}")
+            version_label.setAlignment(Qt.AlignCenter)
+            version_label.setStyleSheet(f"font-size: {int(base_font_size_px*0.7)}px; color: gray;")
+            plot_layout.addWidget(version_label)  # Add the version label to the plot layout
+
             layout.addLayout(plot_layout, 2)  # Allocate 60% to 70% of width for plots
 
             # Right side for user inputs and controls
@@ -279,12 +298,9 @@ class SerialDataSaver(QWidget):
 
             # Add image between status label and input fields
             self.image_label = QLabel(self)
-            # 실행 파일 내부에서 이미지 경로를 찾기 위해서 다음과 같이 수정
             if hasattr(sys, '_MEIPASS'):
-                # PyInstaller로 패키징된 경우 실행 디렉토리 경로 설정
                 image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
             else:
-                # 일반적인 실행 환경에서 이미지 경로 설정
                 image_path = "joint_angle_definition.png"
 
             pixmap = QPixmap(image_path)
@@ -346,6 +362,11 @@ class SerialDataSaver(QWidget):
             self.save_plot_btn.clicked.connect(self.save_plot)
             buttons_layout.addWidget(self.save_plot_btn)
 
+            self.export_csv_btn = QPushButton('EXPORT CSV', self)
+            self.export_csv_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            self.export_csv_btn.clicked.connect(self.export_csv)
+            buttons_layout.addWidget(self.export_csv_btn)
+
             control_layout.addLayout(buttons_layout)
             layout.addLayout(control_layout, 1)  # Allocate 30% to 40% of width for controls
 
@@ -368,7 +389,7 @@ class SerialDataSaver(QWidget):
     def start_reading(self):
         try:
             """Start the serial reading thread."""
-            filename = self.filename_input.text()
+            self.file_name = self.filename_input.text()  # Changed from filename to file_name and made it an instance variable
             shank_diameter = self.patient_shank_diameter_input.text()
             band_elongation = self.patient_band_elongation_input.text()
 
@@ -378,7 +399,7 @@ class SerialDataSaver(QWidget):
 
             recorder_name = self.recorder_name_input.text()
 
-            if not filename:
+            if not self.file_name:
                 return
 
             self.start_btn.setEnabled(False)
@@ -396,7 +417,7 @@ class SerialDataSaver(QWidget):
             self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
 
             # 쓰레드 시작
-            self.thread = SerialReader(filename, header_info, self.processor, self)
+            self.thread = SerialReader(self.file_name, header_info, self.processor, self)
             self.thread.data_processed.connect(self.plot_data)
             self.thread.line_read.connect(self.handle_line_read)
             self.thread.state_changed.connect(self.update_status_label)
@@ -410,14 +431,13 @@ class SerialDataSaver(QWidget):
 
     def load_data(self):
         try:
-            """Load data from a file."""
             options = QFileDialog.Options()
-            file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
-            if file_name:
+            self.file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
+            if self.file_name:
                 header_data = {}
                 
                 # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
-                with open(file_name, 'r') as file:
+                with open(self.file_name, 'r') as file:
                     for line in file:
                         line = line.strip()
                         if not line:
@@ -436,16 +456,15 @@ class SerialDataSaver(QWidget):
                 self.processor.initialize_from_header(header_data)
 
                 # 두 번째로 파일을 열어 데이터를 읽습니다.
-                data = np.loadtxt(file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
+                data = np.loadtxt(self.file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
 
                 # 데이터를 처리하고 플롯을 그립니다.
                 Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+                self.plot_data(Time, Pressure, knee_angle, ankle_angle)
         except Exception as e:
             self.handle_exception(e)
 
-
-    def plot_data(self, Time, Quaternions, Pressure, knee_angle, ankle_angle):
+    def plot_data(self, Time, Pressure, knee_angle, ankle_angle):
         """Plot the processed data."""
         for ax in self.axes:
             ax.clear()
@@ -462,12 +481,6 @@ class SerialDataSaver(QWidget):
         dt = 0.005
         knee_velocity = np.diff(knee_angle) / dt
         ankle_velocity = np.diff(ankle_angle) / dt
-
-        def lowpass_filter(data, cutoff_freq, fs, order=5):
-            nyquist_freq = 0.5 * fs
-            normal_cutoff = cutoff_freq / nyquist_freq
-            b, a = butter(order, normal_cutoff, btype='low', analog=False)
-            return filtfilt(b, a, data)
 
         fs = 1 / dt
         knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
@@ -490,11 +503,42 @@ class SerialDataSaver(QWidget):
 
     def save_plot(self):
         try:
-            """Save the current plot to a file."""
-            options = QFileDialog.Options()
-            file_name, _ = QFileDialog.getSaveFileName(self, "Save Plot", "", "PNG Files (*.png);;All Files (*)", options=options)
-            if file_name:
+            if hasattr(self, 'file_name'):
+                file_name = os.path.splitext(self.file_name)[0] + '.png'
                 self.fig.savefig(file_name)
+
+        except Exception as e:
+            self.handle_exception(e)
+
+    def export_csv(self):
+        try:
+            if hasattr(self, 'file_name'):
+                file_name = os.path.splitext(self.file_name)[0] + '.csv'
+
+                Time_sec = self.processor.Time / 1000.0
+                dt = 0.005
+                knee_velocity = np.diff(self.processor.knee_angle) / dt
+                ankle_velocity = np.diff(self.processor.ankle_angle) / dt
+
+                fs = 1 / dt
+                knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
+                ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
+
+                data_to_export = {
+                    'Time_sec': Time_sec[:-1],
+                    'knee_angle': self.processor.knee_angle[:-1],
+                    'ankle_angle': self.processor.ankle_angle[:-1],
+                    'knee_velocity_filtered': knee_velocity_filtered,
+                    'ankle_velocity_filtered': ankle_velocity_filtered,
+                    'Pressure': self.processor.Pressure[:-1]
+                }
+
+                with open(file_name, 'w', newline='') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=data_to_export.keys())
+                    writer.writeheader()
+                    for i in range(len(Time_sec) - 1):
+                        row = {key: value[i] for key, value in data_to_export.items()}
+                        writer.writerow(row)
 
         except Exception as e:
             self.handle_exception(e)
