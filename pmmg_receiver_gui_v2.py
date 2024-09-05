@@ -22,9 +22,10 @@ import csv
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.02.1"
-# 1.01 Initial release
-# 1.02 After 2 child patients
+PROGRAM_VERSION = "1.02.2"
+# 1.01   Initial release
+# 1.02   After 2 child patients
+# 1.02.2 Minor bug change
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -457,7 +458,7 @@ class SerialDataSaver(QWidget):
 
                 # 데이터를 처리하고 플롯을 그립니다.
                 Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-                self.plot_data(Time, Pressure, knee_angle, ankle_angle)
+                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
         except Exception as e:
             self.handle_exception(e)
 
