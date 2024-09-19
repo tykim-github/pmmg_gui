@@ -2,7 +2,6 @@ import os
 import sys
 import traceback
 import numpy as np
-import pandas as pd
 import serial
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QHBoxLayout, QFileDialog, 
@@ -17,19 +16,19 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 
 import serial.tools.list_ports
 from numpy.linalg import norm
-from scipy.signal import butter, filtfilt
 import csv
 
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.04.1"
+PROGRAM_VERSION = "1.04.2"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
 # 1.03.1 Add features: Flag added
 # 1.03.2 Add features: Flag modified - more accurate flag
 # 1.04.1 Add features: Load setting, csv load is now able
+# 1.04.2 Reduce size, and csv load will now also plot the flags
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -216,11 +215,46 @@ class SerialReader(QThread):
         self.running = False
 
 
-def lowpass_filter(data, cutoff_freq, fs, order=5):
+# def lowpass_filter(data, cutoff_freq, fs, order=5):
+#     nyquist_freq = 0.5 * fs
+#     normal_cutoff = cutoff_freq / nyquist_freq
+#     b, a = butter(order, normal_cutoff, btype='low', analog=False)
+#     return filtfilt(b, a, data)
+
+def lowpass_filter(data, cutoff_freq, fs, order=2):
+    import numpy as np
+
     nyquist_freq = 0.5 * fs
     normal_cutoff = cutoff_freq / nyquist_freq
-    b, a = butter(order, normal_cutoff, btype='low', analog=False)
-    return filtfilt(b, a, data)
+
+    # Butterworth 필터 계수 계산
+    # bilinear 변환을 사용하여 아날로그 필터를 디지털 필터로 변환
+    # order=2인 경우 필터 계수를 직접 계산합니다.
+    if order == 2:
+        C = 1 / np.tan(np.pi * normal_cutoff)
+        a0 = 1 + np.sqrt(2) * C + C**2
+        b0 = 1 / a0
+        b1 = 2 / a0
+        b2 = 1 / a0
+        a1 = 2 * (1 - C**2) / a0
+        a2 = (1 - np.sqrt(2) * C + C**2) / a0
+
+        # 계수를 배열로 저장
+        b = np.array([b0, b1, b2])
+        a = np.array([1, a1, a2])  # a0는 1로 정규화
+    else:
+        raise ValueError("This function currently supports only order=2.")
+
+    # 필터 적용 (전향 및 후향 필터링)
+    filtered_data = np.zeros_like(data)
+    filtered_data[0] = b[0] * data[0]
+    filtered_data[1] = b[0] * data[1] + b[1] * data[0] - a[1] * filtered_data[0]
+
+    for i in range(2, len(data)):
+        filtered_data[i] = (b[0] * data[i] + b[1] * data[i - 1] + b[2] * data[i - 2]
+                            - a[1] * filtered_data[i - 1] - a[2] * filtered_data[i - 2])
+
+    return filtered_data
 
 class Quaternion:
     @staticmethod
@@ -453,73 +487,94 @@ class SerialDataSaver(QWidget):
                 self, "Load Data File", "", 
                 "Text Files (*.txt);;CSV Files (*.csv);;All Files (*)", options=options
             )
-            if self.file_name.lower().endswith('.txt'):
-                header_data = {}
-                
-                # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
-                with open(self.file_name, 'r') as file:
-                    for line in file:
-                        line = line.strip()
-                        if not line:
-                            break  # End of header
-                        key, value_str = line.split('=')
-                        
-                        # Try to convert the value to float(s), but if it fails, keep it as a string
-                        try:
-                            values = list(map(float, value_str.split(',')))
-                            header_data[key] = np.array(values) if len(values) > 1 else values[0]
-                        except ValueError:
-                            # If the value cannot be converted to float, store it as a string
-                            header_data[key] = value_str
+            if self.file_name:
+                if self.file_name.lower().endswith('.txt'):
+                    header_data = {}
+                    
+                    # 헤더 데이터 읽기
+                    with open(self.file_name, 'r') as file:
+                        for line in file:
+                            line = line.strip()
+                            if not line:
+                                break  # 헤더의 끝
+                            key, value_str = line.split('=', 1)
+                            
+                            # 값 변환
+                            try:
+                                values = list(map(float, value_str.split(',')))
+                                header_data[key] = np.array(values) if len(values) > 1 else values[0]
+                            except ValueError:
+                                header_data[key] = value_str
 
-                # DataProcessor 인스턴스를 초기화하고 헤더 정보를 로드합니다.
-                self.processor.initialize_from_header(header_data)
+                    self.processor.initialize_from_header(header_data)
 
-                # 두 번째로 파일을 열어 데이터를 읽습니다.
-                data = np.loadtxt(self.file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
-                # Check for knee_flag and ankle_flag columns
-                num_columns = data.shape[1]
-                expected_columns = 15  # Adjust based on your data columns
-                if num_columns >= expected_columns + 2:
-                    self.processor.knee_flag = data[:, expected_columns].astype(int)
-                    self.processor.ankle_flag = data[:, expected_columns + 1].astype(int)
+                    # 데이터 읽기
+                    data = np.loadtxt(self.file_name, delimiter=',', skiprows=len(header_data) + 1)
+                    Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+                    self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+
+                elif self.file_name.lower().endswith('.csv'):
+                    # `pandas` 없이 CSV 파일을 읽기
+                    with open(self.file_name, 'r', newline='') as file:
+                        reader = csv.reader(file)
+                        header = next(reader)
+                        data = list(reader)
+
+                    # 데이터가 없을 경우 처리
+                    if not data:
+                        QMessageBox.warning(self, "File Error", "CSV 파일에 데이터가 없습니다.")
+                        return
+
+                    # 데이터를 numpy 배열로 변환
+                    try:
+                        data = np.array(data, dtype=float)
+                    except ValueError:
+                        QMessageBox.warning(self, "File Error", "CSV 파일에 숫자가 아닌 값이 포함되어 있습니다.")
+                        return
+
+                    # 필수 열이 있는지 확인
+                    required_columns = ['Time_sec', 'knee_angle', 'ankle_angle', 'Pressure']
+                    for col in required_columns:
+                        if col not in header:
+                            QMessageBox.warning(self, "File Error", f"CSV 파일에 필수 열 '{col}'이(가) 없습니다.")
+                            return
+
+                    # 필수 열 인덱스 가져오기
+                    time_idx = header.index('Time_sec')
+                    knee_angle_idx = header.index('knee_angle')
+                    ankle_angle_idx = header.index('ankle_angle')
+                    pressure_idx = header.index('Pressure')
+
+                    # 데이터 추출
+                    Time_sec = data[:, time_idx]
+                    knee_angle = data[:, knee_angle_idx]
+                    ankle_angle = data[:, ankle_angle_idx]
+                    Pressure = data[:, pressure_idx]
+
+                    # 플래그 열 존재 여부 확인 및 추출
+                    if 'knee_flag' in header:
+                        knee_flag_idx = header.index('knee_flag')
+                        self.processor.knee_flag = data[:, knee_flag_idx].astype(int)
+                    else:
+                        self.processor.knee_flag = np.zeros(len(knee_angle), dtype=int)
+
+                    if 'ankle_flag' in header:
+                        ankle_flag_idx = header.index('ankle_flag')
+                        self.processor.ankle_flag = data[:, ankle_flag_idx].astype(int)
+                    else:
+                        self.processor.ankle_flag = np.zeros(len(ankle_angle), dtype=int)
+
+                    # Processor에 데이터 할당
+                    self.processor.Time = Time_sec * 1000  # ms 단위로 변환
+                    self.processor.knee_angle = knee_angle
+                    self.processor.ankle_angle = ankle_angle
+                    self.processor.Pressure = Pressure
+
+                    # 플롯 그리기
+                    self.plot_data(self.processor.Time, None, self.processor.Pressure, knee_angle, ankle_angle)
+
                 else:
-                    length = len(data)
-                    self.processor.knee_flag = np.zeros(length, dtype=int)
-                    self.processor.ankle_flag = np.zeros(length, dtype=int)
-
-                # 데이터를 처리하고 플롯을 그립니다.
-                Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
-
-            elif self.file_name.lower().endswith('.csv'):
-                # Read the CSV file into a DataFrame
-                df = pd.read_csv(self.file_name)
-
-                # Extract data from DataFrame
-                Time_sec = df['Time_sec'].values
-                knee_angle = df['knee_angle'].values
-                ankle_angle = df['ankle_angle'].values
-                Pressure = df['Pressure'].values
-
-                # Read flags if they exist
-                self.processor.knee_flag = df.get('knee_flag', pd.Series(0, index=df.index)).values.astype(int)
-                self.processor.ankle_flag = df.get('ankle_flag', pd.Series(0, index=df.index)).values.astype(int)
-
-                # Since we don't have Time in milliseconds, convert Time_sec to milliseconds
-                self.processor.Time = Time_sec * 1000  # Convert to ms
-
-                # Store the angles and pressure in the processor
-                self.processor.knee_angle = knee_angle
-                self.processor.ankle_angle = ankle_angle
-                self.processor.Pressure = Pressure
-
-                # Plot the data
-                self.plot_data(self.processor.Time, None, self.processor.Pressure, knee_angle, ankle_angle)
-
-            else:
-                QMessageBox.warning(self, "File Error", "Unsupported file format. Please select a .txt or .csv file.")
-
+                    QMessageBox.warning(self, "File Error", "Unsupported file format. Please select a .txt or .csv file.")
         except Exception as e:
             self.handle_exception(e)
 
@@ -582,8 +637,8 @@ class SerialDataSaver(QWidget):
         ankle_velocity = np.diff(ankle_angle) / dt
 
         fs = 1 / dt
-        knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
-        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 5, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 5, fs)
 
         self.axes[1].plot(self.Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
         self.axes[1].plot(self.Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
