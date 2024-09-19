@@ -321,9 +321,9 @@ class SerialDataSaver(QWidget):
             self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
             patient_info_layout.addRow("Trial Name:", self.filename_input)
 
-            self.patient_shank_diameter_input = QLineEdit(self)
-            self.patient_shank_diameter_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-            patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_diameter_input)
+            self.patient_shank_around_input = QLineEdit(self)
+            self.patient_shank_around_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_around_input)
 
             self.patient_band_elongation_input = QLineEdit(self)
             self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
@@ -393,7 +393,7 @@ class SerialDataSaver(QWidget):
         try:
             """Start the serial reading thread."""
             self.file_name = self.filename_input.text()
-            shank_diameter = self.patient_shank_diameter_input.text()
+            shank_around = self.patient_shank_around_input.text()
             band_elongation = self.patient_band_elongation_input.text()
             initial_knee_angle = float(self.initial_knee_angle_input.text())
             initial_ankle_angle = float(self.initial_ankle_angle_input.text())
@@ -406,11 +406,11 @@ class SerialDataSaver(QWidget):
             self.filename_input.setEnabled(False)
 
             header_info = {
-                "Shank Diameter (mm)": shank_diameter,
-                "Elongated Band Length(mm)": band_elongation,
-                "Initial Knee Angle (deg)": initial_knee_angle,
-                "Initial Ankle Angle (deg)": initial_ankle_angle,
-                "Recorder Name": recorder_name
+                "종아리 둘레 (mm)": shank_around,
+                "늘려진 밴드 길이(mm)": band_elongation,
+                "초기 무릎 각도 (deg)": initial_knee_angle,
+                "초기 발목 각도 (deg)": initial_ankle_angle,
+                "기록자": recorder_name
             }
 
             self.processor = DataProcessor(initial_knee_angle, initial_ankle_angle)
