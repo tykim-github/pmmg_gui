@@ -32,6 +32,7 @@ PROGRAM_VERSION = "1.04.3"
 # 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
 
 # TODO : Flag creation must be available while pressing the button (However, since we "already" separated the whole trials by pressing the button...)
+# TODO : 종아리 둘레 평균은 프로그램이 대신 해줘야 할 것임
 # TODO (PHYSICAL) : Manufacture short band, like 3~4 and send him
 
 class DataProcessor:
