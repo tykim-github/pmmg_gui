@@ -16,16 +16,19 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 
 import serial.tools.list_ports
 from numpy.linalg import norm
-from scipy.signal import butter, filtfilt
 import csv
 
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.02.2"
+PROGRAM_VERSION = "1.04.2"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
+# 1.03.1 Add features: Flag added
+# 1.03.2 Add features: Flag modified - more accurate flag
+# 1.04.1 Add features: Load setting, csv load is now able
+# 1.04.2 Reduce size, and csv load will now also plot the flags
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -41,6 +44,8 @@ class DataProcessor:
         self.knee_angle = None
         self.ankle_angle = None
         self.Pressure = None
+        self.knee_flag = None
+        self.ankle_flag = None
 
     def initialize_from_header(self, header_data):
         """헤더 데이터에서 초기 각도를 설정합니다."""
@@ -69,6 +74,12 @@ class DataProcessor:
 
         self.knee_angle = np.degrees([Quaternion.angle(q) for q in q_k]) + self.initial_knee_angle  # knee_angle 속성으로 저장
         self.ankle_angle = np.degrees([Quaternion.angle(q) for q in q_a]) + self.initial_ankle_angle  # ankle_angle 속성으로 저장
+
+        length = len(self.knee_angle)
+        if self.knee_flag is None or len(self.knee_flag) != length:
+            self.knee_flag = np.zeros(length, dtype=int)
+        if self.ankle_flag is None or len(self.ankle_flag) != length:
+            self.ankle_flag = np.zeros(length, dtype=int)
 
         return self.Time, Quaternions, self.Pressure, self.knee_angle, self.ankle_angle
 
@@ -204,11 +215,46 @@ class SerialReader(QThread):
         self.running = False
 
 
-def lowpass_filter(data, cutoff_freq, fs, order=5):
+# def lowpass_filter(data, cutoff_freq, fs, order=5):
+#     nyquist_freq = 0.5 * fs
+#     normal_cutoff = cutoff_freq / nyquist_freq
+#     b, a = butter(order, normal_cutoff, btype='low', analog=False)
+#     return filtfilt(b, a, data)
+
+def lowpass_filter(data, cutoff_freq, fs, order=2):
+    import numpy as np
+
     nyquist_freq = 0.5 * fs
     normal_cutoff = cutoff_freq / nyquist_freq
-    b, a = butter(order, normal_cutoff, btype='low', analog=False)
-    return filtfilt(b, a, data)
+
+    # Butterworth 필터 계수 계산
+    # bilinear 변환을 사용하여 아날로그 필터를 디지털 필터로 변환
+    # order=2인 경우 필터 계수를 직접 계산합니다.
+    if order == 2:
+        C = 1 / np.tan(np.pi * normal_cutoff)
+        a0 = 1 + np.sqrt(2) * C + C**2
+        b0 = 1 / a0
+        b1 = 2 / a0
+        b2 = 1 / a0
+        a1 = 2 * (1 - C**2) / a0
+        a2 = (1 - np.sqrt(2) * C + C**2) / a0
+
+        # 계수를 배열로 저장
+        b = np.array([b0, b1, b2])
+        a = np.array([1, a1, a2])  # a0는 1로 정규화
+    else:
+        raise ValueError("This function currently supports only order=2.")
+
+    # 필터 적용 (전향 및 후향 필터링)
+    filtered_data = np.zeros_like(data)
+    filtered_data[0] = b[0] * data[0]
+    filtered_data[1] = b[0] * data[1] + b[1] * data[0] - a[1] * filtered_data[0]
+
+    for i in range(2, len(data)):
+        filtered_data[i] = (b[0] * data[i] + b[1] * data[i - 1] + b[2] * data[i - 2]
+                            - a[1] * filtered_data[i - 1] - a[2] * filtered_data[i - 2])
+
+    return filtered_data
 
 class Quaternion:
     @staticmethod
@@ -275,6 +321,7 @@ class SerialDataSaver(QWidget):
             plot_layout = QVBoxLayout()
             self.fig = plt.figure(figsize=(15, 15))
             self.canvas = FigureCanvas(self.fig)
+            self.canvas.mpl_connect('button_press_event', self.on_click)
             plot_layout.addWidget(self.canvas)
 
             # Add the navigation toolbar
@@ -321,9 +368,9 @@ class SerialDataSaver(QWidget):
             self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
             patient_info_layout.addRow("Trial Name:", self.filename_input)
 
-            self.patient_shank_diameter_input = QLineEdit(self)
-            self.patient_shank_diameter_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-            patient_info_layout.addRow("Shank Diameter (mm):", self.patient_shank_diameter_input)
+            self.patient_shank_circum_input = QLineEdit(self)
+            self.patient_shank_circum_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Shank Circumference (mm):", self.patient_shank_circum_input)
 
             self.patient_band_elongation_input = QLineEdit(self)
             self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
@@ -361,6 +408,11 @@ class SerialDataSaver(QWidget):
             load_btn.clicked.connect(self.load_data)
             buttons_layout.addWidget(load_btn)
 
+            load_setting_btn = QPushButton('LOAD SETTING', self)
+            load_setting_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
+            load_setting_btn.clicked.connect(self.load_setting)
+            buttons_layout.addWidget(load_setting_btn)
+
             self.save_plot_btn = QPushButton('SAVE PLOT', self)
             self.save_plot_btn.setStyleSheet(f"font-size: {int(base_font_size_px*1.4)}px;")
             self.save_plot_btn.clicked.connect(self.save_plot)
@@ -393,7 +445,7 @@ class SerialDataSaver(QWidget):
         try:
             """Start the serial reading thread."""
             self.file_name = self.filename_input.text()
-            shank_diameter = self.patient_shank_diameter_input.text()
+            shank_circum = self.patient_shank_circum_input.text()
             band_elongation = self.patient_band_elongation_input.text()
             initial_knee_angle = float(self.initial_knee_angle_input.text())
             initial_ankle_angle = float(self.initial_ankle_angle_input.text())
@@ -406,7 +458,8 @@ class SerialDataSaver(QWidget):
             self.filename_input.setEnabled(False)
 
             header_info = {
-                "Shank Diameter (mm)": shank_diameter,
+                "Trial Name": self.file_name,
+                "Shank Circumference (mm)": shank_circum,
                 "Elongated Band Length(mm)": band_elongation,
                 "Initial Knee Angle (deg)": initial_knee_angle,
                 "Initial Ankle Angle (deg)": initial_ankle_angle,
@@ -430,35 +483,126 @@ class SerialDataSaver(QWidget):
     def load_data(self):
         try:
             options = QFileDialog.Options()
-            self.file_name, _ = QFileDialog.getOpenFileName(self, "Load Data File", "", "Text Files (*.txt);;All Files (*)", options=options)
+            self.file_name, _ = QFileDialog.getOpenFileName(
+                self, "Load Data File", "", 
+                "Text Files (*.txt);;CSV Files (*.csv);;All Files (*)", options=options
+            )
             if self.file_name:
+                if self.file_name.lower().endswith('.txt'):
+                    header_data = {}
+                    
+                    # 헤더 데이터 읽기
+                    with open(self.file_name, 'r') as file:
+                        for line in file:
+                            line = line.strip()
+                            if not line:
+                                break  # 헤더의 끝
+                            key, value_str = line.split('=', 1)
+                            
+                            # 값 변환
+                            try:
+                                values = list(map(float, value_str.split(',')))
+                                header_data[key] = np.array(values) if len(values) > 1 else values[0]
+                            except ValueError:
+                                header_data[key] = value_str
+
+                    self.processor.initialize_from_header(header_data)
+
+                    # 데이터 읽기
+                    data = np.loadtxt(self.file_name, delimiter=',', skiprows=len(header_data) + 1)
+                    Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
+                    self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+
+                elif self.file_name.lower().endswith('.csv'):
+                    # `pandas` 없이 CSV 파일을 읽기
+                    with open(self.file_name, 'r', newline='') as file:
+                        reader = csv.reader(file)
+                        header = next(reader)
+                        data = list(reader)
+
+                    # 데이터가 없을 경우 처리
+                    if not data:
+                        QMessageBox.warning(self, "File Error", "CSV 파일에 데이터가 없습니다.")
+                        return
+
+                    # 데이터를 numpy 배열로 변환
+                    try:
+                        data = np.array(data, dtype=float)
+                    except ValueError:
+                        QMessageBox.warning(self, "File Error", "CSV 파일에 숫자가 아닌 값이 포함되어 있습니다.")
+                        return
+
+                    # 필수 열이 있는지 확인
+                    required_columns = ['Time_sec', 'knee_angle', 'ankle_angle', 'Pressure']
+                    for col in required_columns:
+                        if col not in header:
+                            QMessageBox.warning(self, "File Error", f"CSV 파일에 필수 열 '{col}'이(가) 없습니다.")
+                            return
+
+                    # 필수 열 인덱스 가져오기
+                    time_idx = header.index('Time_sec')
+                    knee_angle_idx = header.index('knee_angle')
+                    ankle_angle_idx = header.index('ankle_angle')
+                    pressure_idx = header.index('Pressure')
+
+                    # 데이터 추출
+                    Time_sec = data[:, time_idx]
+                    knee_angle = data[:, knee_angle_idx]
+                    ankle_angle = data[:, ankle_angle_idx]
+                    Pressure = data[:, pressure_idx]
+
+                    # 플래그 열 존재 여부 확인 및 추출
+                    if 'knee_flag' in header:
+                        knee_flag_idx = header.index('knee_flag')
+                        self.processor.knee_flag = data[:, knee_flag_idx].astype(int)
+                    else:
+                        self.processor.knee_flag = np.zeros(len(knee_angle), dtype=int)
+
+                    if 'ankle_flag' in header:
+                        ankle_flag_idx = header.index('ankle_flag')
+                        self.processor.ankle_flag = data[:, ankle_flag_idx].astype(int)
+                    else:
+                        self.processor.ankle_flag = np.zeros(len(ankle_angle), dtype=int)
+
+                    # Processor에 데이터 할당
+                    self.processor.Time = Time_sec * 1000  # ms 단위로 변환
+                    self.processor.knee_angle = knee_angle
+                    self.processor.ankle_angle = ankle_angle
+                    self.processor.Pressure = Pressure
+
+                    # 플롯 그리기
+                    self.plot_data(self.processor.Time, None, self.processor.Pressure, knee_angle, ankle_angle)
+
+                else:
+                    QMessageBox.warning(self, "File Error", "Unsupported file format. Please select a .txt or .csv file.")
+        except Exception as e:
+            self.handle_exception(e)
+
+    def load_setting(self):
+        try:
+            options = QFileDialog.Options()
+            file_name, _ = QFileDialog.getOpenFileName(
+                self, "Load Setting File", "", 
+                "Text Files (*.txt);;All Files (*)", options=options
+            )
+            if file_name:
                 header_data = {}
-                
-                # 첫 번째로 파일을 열어 헤더 정보를 읽습니다.
-                with open(self.file_name, 'r') as file:
+                # Read header data
+                with open(file_name, 'r') as file:
                     for line in file:
                         line = line.strip()
                         if not line:
                             break  # End of header
                         key, value_str = line.split('=')
-                        
-                        # Try to convert the value to float(s), but if it fails, keep it as a string
-                        try:
-                            values = list(map(float, value_str.split(',')))
-                            header_data[key] = np.array(values) if len(values) > 1 else values[0]
-                        except ValueError:
-                            # If the value cannot be converted to float, store it as a string
-                            header_data[key] = value_str
+                        header_data[key] = value_str
 
-                # DataProcessor 인스턴스를 초기화하고 헤더 정보를 로드합니다.
-                self.processor.initialize_from_header(header_data)
-
-                # 두 번째로 파일을 열어 데이터를 읽습니다.
-                data = np.loadtxt(self.file_name, delimiter=',', skiprows=len(header_data) + 1)  # 헤더 줄을 건너뛰도록 설정
-
-                # 데이터를 처리하고 플롯을 그립니다.
-                Time, Quaternions, Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
-                self.plot_data(Time, Quaternions, Pressure, knee_angle, ankle_angle)
+                # Populate the input fields with header data
+                self.filename_input.setText(header_data.get('Trial Name', ''))
+                self.patient_shank_circum_input.setText(header_data.get('Shank Circumference (mm)', ''))
+                self.patient_band_elongation_input.setText(header_data.get('Elongated Band Length(mm)', ''))
+                self.initial_knee_angle_input.setText(header_data.get('Initial Knee Angle (deg)', ''))
+                self.initial_ankle_angle_input.setText(header_data.get('Initial Ankle Angle (deg)', ''))
+                self.recorder_name_input.setText(header_data.get('Recorder Name', ''))
         except Exception as e:
             self.handle_exception(e)
 
@@ -467,37 +611,86 @@ class SerialDataSaver(QWidget):
         for ax in self.axes:
             ax.clear()
 
-        Time_sec = Time / 1000.0
+        self.Time_sec = Time / 1000.0  # Store as attribute
+        self.knee_angle = knee_angle   # Store as attribute
+        self.ankle_angle = ankle_angle # Store as attribute
 
-        self.axes[0].plot(Time_sec, knee_angle, color='darkred', label='Knee joint')
-        self.axes[0].plot(Time_sec, ankle_angle, color='darkblue', label='Ankle joint')
+        # Plot knee and ankle angles with pickable lines
+        self.line_knee, = self.axes[0].plot(self.Time_sec, self.knee_angle, color='darkred', label='Knee joint', picker=5)
+        self.line_ankle, = self.axes[0].plot(self.Time_sec, self.ankle_angle, color='darkblue', label='Ankle joint', picker=5)
         self.axes[0].set_xlabel("Time (sec)")
         self.axes[0].set_ylabel("Angle (deg)")
         self.axes[0].legend()
         self.axes[0].grid(True)
+
+        # Plot flagged points using scatter for knee and ankle
+        knee_flagged_indices = np.where(self.processor.knee_flag != 0)[0]
+        self.scatter_knee = self.axes[0].scatter(self.Time_sec[knee_flagged_indices], self.knee_angle[knee_flagged_indices],
+                                                 facecolors='none', edgecolors='red', s=50, label='Flagged Knee Points')
+
+        ankle_flagged_indices = np.where(self.processor.ankle_flag != 0)[0]
+        self.scatter_ankle = self.axes[0].scatter(self.Time_sec[ankle_flagged_indices], self.ankle_angle[ankle_flagged_indices],
+                                                  facecolors='none', edgecolors='blue', s=50, label='Flagged Ankle Points')
 
         dt = 0.005
         knee_velocity = np.diff(knee_angle) / dt
         ankle_velocity = np.diff(ankle_angle) / dt
 
         fs = 1 / dt
-        knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
-        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
+        knee_velocity_filtered = lowpass_filter(knee_velocity, 5, fs)
+        ankle_velocity_filtered = lowpass_filter(ankle_velocity, 5, fs)
 
-        self.axes[1].plot(Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
-        self.axes[1].plot(Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
+        self.axes[1].plot(self.Time_sec[:-1], knee_velocity_filtered, color='darkred', label='Knee joint velocity (filtered)')
+        self.axes[1].plot(self.Time_sec[:-1], ankle_velocity_filtered, color='darkblue', label='Ankle joint velocity (filtered)')
         self.axes[1].set_xlabel("Time (sec)")
         self.axes[1].set_ylabel("Angular Velocity (deg/sec)")
         self.axes[1].legend()
         self.axes[1].grid(True)
 
-        self.axes[2].plot(Time_sec, self.processor.Pressure, color='black', label='pMMG')
+        self.axes[2].plot(self.Time_sec, self.processor.Pressure, color='black', label='pMMG')
         self.axes[2].set_xlabel("Time (sec)")
         self.axes[2].set_ylabel("Pressure (kPa)")
         self.axes[2].legend()
         self.axes[2].grid(True)
 
         self.canvas.draw()
+
+    def on_click(self, event):
+        if event.inaxes != self.axes[0]:
+            return
+
+        # Get the click coordinates
+        x_click = event.xdata
+        y_click = event.ydata
+
+        # Determine if the click is closer to knee or ankle line
+        knee_y = np.interp(x_click, self.Time_sec, self.knee_angle)
+        ankle_y = np.interp(x_click, self.Time_sec, self.ankle_angle)
+
+        knee_dist = abs(y_click - knee_y)
+        ankle_dist = abs(y_click - ankle_y)
+
+        # Define a threshold for proximity (you may adjust this value)
+        threshold = 5  # degrees or units of y-axis
+
+        if knee_dist < ankle_dist and knee_dist < threshold:
+            # Find the closest index in knee data
+            ind = np.argmin(abs(self.Time_sec - x_click))
+            # Toggle the flag
+            self.processor.knee_flag[ind] = 0 if self.processor.knee_flag[ind] else 1
+            # Update scatter plot
+            knee_flagged_indices = np.where(self.processor.knee_flag != 0)[0]
+            self.scatter_knee.set_offsets(np.c_[self.Time_sec[knee_flagged_indices], self.knee_angle[knee_flagged_indices]])
+            self.canvas.draw_idle()
+        elif ankle_dist <= knee_dist and ankle_dist < threshold:
+            # Find the closest index in ankle data
+            ind = np.argmin(abs(self.Time_sec - x_click))
+            # Toggle the flag
+            self.processor.ankle_flag[ind] = 0 if self.processor.ankle_flag[ind] else 1
+            # Update scatter plot
+            ankle_flagged_indices = np.where(self.processor.ankle_flag != 0)[0]
+            self.scatter_ankle.set_offsets(np.c_[self.Time_sec[ankle_flagged_indices], self.ankle_angle[ankle_flagged_indices]])
+            self.canvas.draw_idle()
 
     def save_plot(self):
         try:
@@ -509,37 +702,39 @@ class SerialDataSaver(QWidget):
             self.handle_exception(e)
 
     def export_csv(self):
-        try:
-            if hasattr(self, 'file_name'):
-                file_name = os.path.splitext(self.file_name)[0] + '.csv'
+          try:
+              if hasattr(self, 'file_name'):
+                  file_name = os.path.splitext(self.file_name)[0] + '.csv'
 
-                Time_sec = self.processor.Time / 1000.0
-                dt = 0.005
-                knee_velocity = np.diff(self.processor.knee_angle) / dt
-                ankle_velocity = np.diff(self.processor.ankle_angle) / dt
+                  Time_sec = self.processor.Time / 1000.0
+                  dt = 0.005
+                  knee_velocity = np.diff(self.processor.knee_angle) / dt
+                  ankle_velocity = np.diff(self.processor.ankle_angle) / dt
 
-                fs = 1 / dt
-                knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
-                ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
+                  fs = 1 / dt
+                  knee_velocity_filtered = lowpass_filter(knee_velocity, 13, fs)
+                  ankle_velocity_filtered = lowpass_filter(ankle_velocity, 13, fs)
 
-                data_to_export = {
-                    'Time_sec': Time_sec[:-1],
-                    'knee_angle': self.processor.knee_angle[:-1],
-                    'ankle_angle': self.processor.ankle_angle[:-1],
-                    'knee_velocity_filtered': knee_velocity_filtered,
-                    'ankle_velocity_filtered': ankle_velocity_filtered,
-                    'Pressure': self.processor.Pressure[:-1]
-                }
+                  data_to_export = {
+                      'Time_sec': Time_sec[:-1],
+                      'knee_angle': self.processor.knee_angle[:-1],
+                      'ankle_angle': self.processor.ankle_angle[:-1],
+                      'knee_velocity_filtered': knee_velocity_filtered,
+                      'ankle_velocity_filtered': ankle_velocity_filtered,
+                      'Pressure': self.processor.Pressure[:-1],
+                      'knee_flag': self.processor.knee_flag[:-1],
+                      'ankle_flag': self.processor.ankle_flag[:-1]
+                  }
 
-                with open(file_name, 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=data_to_export.keys())
-                    writer.writeheader()
-                    for i in range(len(Time_sec) - 1):
-                        row = {key: value[i] for key, value in data_to_export.items()}
-                        writer.writerow(row)
+                  with open(file_name, 'w', newline='') as csvfile:
+                      writer = csv.DictWriter(csvfile, fieldnames=data_to_export.keys())
+                      writer.writeheader()
+                      for i in range(len(Time_sec) - 1):
+                          row = {key: value[i] for key, value in data_to_export.items()}
+                          writer.writerow(row)
 
-        except Exception as e:
-            self.handle_exception(e)
+          except Exception as e:
+              self.handle_exception(e)
 
     def update_status_label(self, status_code):
         """Update the status label based on the status code."""
