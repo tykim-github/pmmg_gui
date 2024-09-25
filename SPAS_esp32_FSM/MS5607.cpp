@@ -7,8 +7,8 @@
 
 #include "MS5607.h"
 #include <SPI.h>
-//SPISettings settingsA(1000000, MSBFIRST, SPI_MODE0);  // define SPI settings; limit SPI communication to 40MHz
-SPISettings settingsA(10000000, MSBFIRST, SPI_MODE0);  // define SPI settings; limit SPI communication to 40MHz
+SPISettings settingsA(1000000, MSBFIRST, SPI_MODE0);  // define SPI settings; limit SPI communication to 40MHz
+// SPISettings settingsA(10000000, MSBFIRST, SPI_MODE0);  // define SPI settings; limit SPI communication to 40MHz
 
 #ifdef ESP8266
 #define min _min

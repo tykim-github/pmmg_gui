@@ -21,7 +21,7 @@ import csv
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.04.2"
+PROGRAM_VERSION = "1.04.3"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
@@ -29,6 +29,10 @@ PROGRAM_VERSION = "1.04.2"
 # 1.03.2 Add features: Flag modified - more accurate flag
 # 1.04.1 Add features: Load setting, csv load is now able
 # 1.04.2 Reduce size, and csv load will now also plot the flags
+# 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
+
+# TODO : Flag creation must be available while pressing the button (However, since we "already" separated the whole trials by pressing the button...)
+# TODO (PHYSICAL) : Manufacture short band, like 3~4 and send him
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -485,7 +489,7 @@ class SerialDataSaver(QWidget):
             options = QFileDialog.Options()
             self.file_name, _ = QFileDialog.getOpenFileName(
                 self, "Load Data File", "", 
-                "Text Files (*.txt);;CSV Files (*.csv);;All Files (*)", options=options
+                "All Files (*);;Text Files (*.txt);;CSV Files (*.csv)", options=options
             )
             if self.file_name:
                 if self.file_name.lower().endswith('.txt'):
@@ -574,7 +578,7 @@ class SerialDataSaver(QWidget):
                     self.plot_data(self.processor.Time, None, self.processor.Pressure, knee_angle, ankle_angle)
 
                 else:
-                    QMessageBox.warning(self, "File Error", "Unsupported file format. Please select a .txt or .csv file.")
+                    QMessageBox.warning(self, "File Error", "지원하지 않는 파일 형식입니다. txt 또는 csv 파일을 선택하십시오.")
         except Exception as e:
             self.handle_exception(e)
 
@@ -742,8 +746,8 @@ class SerialDataSaver(QWidget):
             "101": "Standby",
             "102": "Leg zeroing started",
             "103": "Leg zeroing stopped",
-            "104": "Reading started",
-            "105": "Reading stopped",
+            "104": "Recording started",
+            "105": "Recording stopped",
             "106": "Magnetometer calibrating",
             "201": "ERROR - Low voltage",
             "202": "ERROR - pMMG malfunction",
