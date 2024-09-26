@@ -21,7 +21,7 @@ import csv
 # to make this exe
 # pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.04.3"
+PROGRAM_VERSION = "1.05.1"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
@@ -30,9 +30,9 @@ PROGRAM_VERSION = "1.04.3"
 # 1.04.1 Add features: Load setting, csv load is now able
 # 1.04.2 Reduce size, and csv load will now also plot the flags
 # 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
+# 1.05.1 밴드 위/아래의 종아리 둘레를 모두 입력하도록 함
 
 # TODO : Flag creation must be available while pressing the button (However, since we "already" separated the whole trials by pressing the button...)
-# TODO : 종아리 둘레 평균은 프로그램이 대신 해줘야 할 것임
 # TODO (PHYSICAL) : Manufacture short band, like 3~4 and send him
 
 class DataProcessor:
@@ -219,22 +219,12 @@ class SerialReader(QThread):
         """Stop the serial reading thread."""
         self.running = False
 
-
-# def lowpass_filter(data, cutoff_freq, fs, order=5):
-#     nyquist_freq = 0.5 * fs
-#     normal_cutoff = cutoff_freq / nyquist_freq
-#     b, a = butter(order, normal_cutoff, btype='low', analog=False)
-#     return filtfilt(b, a, data)
-
 def lowpass_filter(data, cutoff_freq, fs, order=2):
     import numpy as np
 
     nyquist_freq = 0.5 * fs
     normal_cutoff = cutoff_freq / nyquist_freq
 
-    # Butterworth 필터 계수 계산
-    # bilinear 변환을 사용하여 아날로그 필터를 디지털 필터로 변환
-    # order=2인 경우 필터 계수를 직접 계산합니다.
     if order == 2:
         C = 1 / np.tan(np.pi * normal_cutoff)
         a0 = 1 + np.sqrt(2) * C + C**2
@@ -373,9 +363,13 @@ class SerialDataSaver(QWidget):
             self.filename_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
             patient_info_layout.addRow("Trial Name:", self.filename_input)
 
-            self.patient_shank_circum_input = QLineEdit(self)
-            self.patient_shank_circum_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
-            patient_info_layout.addRow("Shank Circumference (mm):", self.patient_shank_circum_input)
+            self.patient_shank_upper_circum_input = QLineEdit(self)
+            self.patient_shank_upper_circum_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Shank Upper Circumference (mm):", self.patient_shank_upper_circum_input)
+
+            self.patient_shank_lower_circum_input = QLineEdit(self)
+            self.patient_shank_lower_circum_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
+            patient_info_layout.addRow("Shank Lower Circumference (mm):", self.patient_shank_lower_circum_input)
 
             self.patient_band_elongation_input = QLineEdit(self)
             self.patient_band_elongation_input.setStyleSheet(f"font-size: {base_font_size_px}px;")
@@ -450,7 +444,8 @@ class SerialDataSaver(QWidget):
         try:
             """Start the serial reading thread."""
             self.file_name = self.filename_input.text()
-            shank_circum = self.patient_shank_circum_input.text()
+            shank_upper_circum = self.patient_shank_upper_circum_input.text()
+            shank_lower_circum = self.patient_shank_lower_circum_input.text()
             band_elongation = self.patient_band_elongation_input.text()
             initial_knee_angle = float(self.initial_knee_angle_input.text())
             initial_ankle_angle = float(self.initial_ankle_angle_input.text())
@@ -464,7 +459,8 @@ class SerialDataSaver(QWidget):
 
             header_info = {
                 "Trial Name": self.file_name,
-                "Shank Circumference (mm)": shank_circum,
+                "Shank Upper Circumference (mm)": shank_upper_circum,
+                "Shank Lower Circumference (mm)": shank_lower_circum,
                 "Elongated Band Length(mm)": band_elongation,
                 "Initial Knee Angle (deg)": initial_knee_angle,
                 "Initial Ankle Angle (deg)": initial_ankle_angle,
@@ -603,7 +599,8 @@ class SerialDataSaver(QWidget):
 
                 # Populate the input fields with header data
                 self.filename_input.setText(header_data.get('Trial Name', ''))
-                self.patient_shank_circum_input.setText(header_data.get('Shank Circumference (mm)', ''))
+                self.patient_shank_upper_circum_input.setText(header_data.get('Shank Upper Circumference (mm)', ''))
+                self.patient_shank_lower_circum_input.setText(header_data.get('Shank Lower Circumference (mm)', ''))
                 self.patient_band_elongation_input.setText(header_data.get('Elongated Band Length(mm)', ''))
                 self.initial_knee_angle_input.setText(header_data.get('Initial Knee Angle (deg)', ''))
                 self.initial_ankle_angle_input.setText(header_data.get('Initial Ankle Angle (deg)', ''))

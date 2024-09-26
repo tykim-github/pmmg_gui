@@ -95,6 +95,8 @@ void setup() {
   pinMode(BATTERY, INPUT);
   pinMode(PMMG_CS, OUTPUT);
 
+  digitalWrite(LED_PIN, HIGH);
+
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
     // Serial.println("Error initializing ESP-NOW");
@@ -232,6 +234,7 @@ void handleStandby() {
     if (digitalRead(BUTTON) == HIGH) {
       nextState = LEG_ZEROING;
       stateEntryTime = millis();
+      digitalWrite(LED_PIN, LOW);
       storeMsg(MSG_ZEROING_STARTED);
       buttonPressTime = 0;
     }
@@ -240,6 +243,7 @@ void handleStandby() {
 
 void handleLegZeroing() {
   if (button_is_pushed) {
+    digitalWrite(LED_PIN, HIGH);
     nextState = LEG_ZEROING_END;
     storeMsg(MSG_ZEROING_STOPPED);
   }
@@ -254,8 +258,21 @@ void handleLegZeroingEnd() {
 }
 
 void handleReadSensors() {
+  if ((millis() - stateEntryTime)%1000 == 0) {
+    digitalWrite(LED_PIN, LOW);
+  }
+  if ((millis() - stateEntryTime)%1000 == 75) {
+    digitalWrite(LED_PIN, HIGH);
+  }
+  if ((millis() - stateEntryTime)%1000 == 150) {
+    digitalWrite(LED_PIN, LOW);
+  }
+  if ((millis() - stateEntryTime)%1000 == 300) {
+    digitalWrite(LED_PIN, HIGH);
+  }
   if (button_is_pushed) {
     nextState = READ_SENSORS_END;
+    digitalWrite(LED_PIN, HIGH);
     storeMsg(MSG_READING_STOPPED);
   }
 }
