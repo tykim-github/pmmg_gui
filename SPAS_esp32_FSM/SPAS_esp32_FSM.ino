@@ -65,12 +65,14 @@ const unsigned long debounceDelay = 20;
 const uint16_t battery_threshold = 4000;
 
 #define LONG_PRESS_TIME 1000
-unsigned long stateEntryTime = 0;  // Stores the time when a specific state is entered
+volatile unsigned long stateEntryTime = 0;  // Stores the time when a specific state is entered
 
 
 // Declare a handle for the timer
 void IRAM_ATTR onTimer(void* arg);
-esp_timer_handle_t myTimer = NULL;
+void IRAM_ATTR led_blink_timer_callback(void* arg);
+esp_timer_handle_t mainTimer = NULL;
+esp_timer_handle_t ledBlinkTimer = NULL;
 
 // WI-FI
 uint8_t broadcastAddress[] = { 0xAC, 0x67, 0xB2, 0x40, 0x13, 0x8C };
@@ -112,14 +114,21 @@ void setup() {
     return;
   }
 
-  const esp_timer_create_args_t timerArgs = {
+  const esp_timer_create_args_t maintimerArgs = {
     .callback = &onTimer,
     .arg = NULL,
     .name = "periodicTimer"
   };
 
-  esp_timer_create(&timerArgs, &myTimer);
-  esp_timer_start_periodic(myTimer, 5000);
+  const esp_timer_create_args_t ledBlinkTimerArgs = {
+    .callback = &led_blink_timer_callback,
+    .arg = NULL,
+    .name = "ledBlinkTimer"
+  };
+
+  esp_timer_create(&maintimerArgs, &mainTimer);
+  esp_timer_create(&ledBlinkTimerArgs, &ledBlinkTimer);
+  esp_timer_start_periodic(mainTimer, 5000);
 }
 // ################################################################# //
 
@@ -193,7 +202,7 @@ void loop() {
 }
 
 void handleIdle() {
-  esp_timer_stop(myTimer);
+  esp_timer_stop(mainTimer);
 
   IMUSerial1.begin(115200, SERIAL_8N1, IMU1_RX, IMU1_TX);
   IMUSerial2.begin(115200, SERIAL_8N1, IMU2_RX, IMU2_TX);
@@ -201,7 +210,7 @@ void handleIdle() {
   SPI.begin();
   PMMG.init();
 
-  esp_timer_start_periodic(myTimer, 5000);
+  esp_timer_start_periodic(mainTimer, 5000);
 
   nextState = (analogRead(BATTERY) < battery_threshold) ? LOW_VOLTAGE : STANDBY;
   storeMsg(nextState == LOW_VOLTAGE ? ERROR_LOW_VOLTAGE : MSG_STATE_IS_STANDBY);
@@ -252,26 +261,16 @@ void handleLegZeroing() {
 void handleLegZeroingEnd() {
   if (button_is_pushed) {
     nextState = READ_SENSORS;
+    esp_timer_start_periodic(ledBlinkTimer, 100000);
     stateEntryTime = millis();
     storeMsg(MSG_READING_STARTED);
   }
 }
 
 void handleReadSensors() {
-  if ((millis() - stateEntryTime)%1000 == 0) {
-    digitalWrite(LED_PIN, LOW);
-  }
-  if ((millis() - stateEntryTime)%1000 == 75) {
-    digitalWrite(LED_PIN, HIGH);
-  }
-  if ((millis() - stateEntryTime)%1000 == 150) {
-    digitalWrite(LED_PIN, LOW);
-  }
-  if ((millis() - stateEntryTime)%1000 == 300) {
-    digitalWrite(LED_PIN, HIGH);
-  }
   if (button_is_pushed) {
     nextState = READ_SENSORS_END;
+    esp_timer_stop(ledBlinkTimer);
     digitalWrite(LED_PIN, HIGH);
     storeMsg(MSG_READING_STOPPED);
   }
@@ -289,6 +288,7 @@ void handleReadSensorsEnd() {
   } else if (buttonPressTime > 0 && (millis() - buttonPressTime) < LONG_PRESS_TIME) {
     if (digitalRead(BUTTON) == HIGH) {
       nextState = READ_SENSORS;
+      esp_timer_start_periodic(ledBlinkTimer, 100000);
       stateEntryTime = millis();
       storeMsg(MSG_READING_STARTED);
       buttonPressTime = 0;
@@ -397,6 +397,18 @@ void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
 void IRAM_ATTR onTimer(void* arg) {
   if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
     processDataFlag = true;
+  }
+}
+
+void IRAM_ATTR led_blink_timer_callback(void* arg) {
+  static int blinkState = 0;
+  blinkState = (blinkState + 1) % 10;  // Cycle through 0 to 3
+
+  // Define your blinking pattern
+  if (blinkState == 0 || blinkState == 2) {
+    digitalWrite(LED_PIN, LOW);
+  } else {
+    digitalWrite(LED_PIN, HIGH);
   }
 }
 
