@@ -1,4 +1,4 @@
-# Ignore executable files
+# Ignore executable files.
 *.exe
 *.txt
 *.png
@@ -6,6 +6,6 @@
 *.ico
 *.csv
 
-# Ignore PyInstaller build directories
+# Ignore PyInstaller build directories.
 /build/
 /dist/
