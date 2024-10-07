@@ -212,9 +212,9 @@ void loop() {
 void handleIdle() {
   esp_timer_stop(mainTimer);
 
-  IMUSerial1.begin(115200, SERIAL_8N1, IMU1_RX, IMU1_TX);
-  IMUSerial2.begin(115200, SERIAL_8N1, IMU2_RX, IMU2_TX);
-  IMUSerial3.begin(115200, SERIAL_8N1, IMU3_RX, IMU3_TX);
+  IMUSerial1.begin(921600, SERIAL_8N1, IMU1_RX, IMU1_TX);
+  IMUSerial2.begin(921600, SERIAL_8N1, IMU2_RX, IMU2_TX);
+  IMUSerial3.begin(921600, SERIAL_8N1, IMU3_RX, IMU3_TX);
   SPI.begin();
   PMMG.init();
 

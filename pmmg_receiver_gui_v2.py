@@ -21,9 +21,9 @@ from playsound import playsound
 import threading
 
 # to make this exe
-# pyinstaller --onefile --noconsole --strip --icon=legmus.ico --add-data="audio_files;audio_files" pmmg_receiver_gui_v2.py
+# pyinstaller --onefile --noconsole --strip --icon=legmus.ico --add-data="files;files" pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.06.1"
+PROGRAM_VERSION = "1.06.2"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
@@ -34,6 +34,7 @@ PROGRAM_VERSION = "1.06.1"
 # 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
 # 1.05.1 밴드 위/아래의 종아리 둘레를 모두 입력하도록 함
 # 1.06.1 Audio added for 102, 103, 104, 105 state
+# 1.06.2 Set baudrate 115200 -> 951200
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -166,7 +167,7 @@ class SerialReader(QThread):
             return  # 메서드를 종료하여 더 이상 코드를 실행하지 않도록 합니다.
 
         try:
-            ser = serial.Serial(self.com_port, 115200, timeout=1)
+            ser = serial.Serial(self.com_port, 921600, timeout=1)
         except serial.SerialException as e:
             self.state_changed.emit("SerialFail")
             return  # 메서드를 종료하여 더 이상 코드를 실행하지 않도록 합니다.

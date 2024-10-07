@@ -30,7 +30,7 @@ void onDataReceiver(const esp_now_recv_info *recvInfo, const uint8_t *incomingDa
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(921600);
   WiFi.mode(WIFI_STA);
   uint8_t newMACAddress[] = {0xAC, 0x67, 0xB2, 0x40, 0x13, 0x8C}; //AC:67:B2:40:13:8C
   esp_wifi_set_mac(WIFI_IF_STA, &newMACAddress[0]);
