@@ -31,18 +31,26 @@ enum State {
   READ_SENSORS_END,
   MAG_CALIBRATION
 };
+
+enum MagCalState {
+  START_CALIBRATION,
+  WAIT_FOR_BUTTON_PRESS,
+  SEND_CALIBRATION_COMMANDS
+};
+
 volatile State currentState = IDLE;
 volatile State nextState = IDLE;
+volatile MagCalState magCalibrationState = START_CALIBRATION;
 
 #define MSG_STATE_IS_STANDBY 101
-#define MSG_ZEROING_STARTED  102
-#define MSG_ZEROING_STOPPED  103
-#define MSG_READING_STARTED  104
-#define MSG_READING_STOPPED  105
+#define MSG_ZEROING_STARTED 102
+#define MSG_ZEROING_STOPPED 103
+#define MSG_READING_STARTED 104
+#define MSG_READING_STOPPED 105
 #define MSG_STATE_IS_MAG_CAL 106
-#define ERROR_LOW_VOLTAGE    201
-#define ERROR_PMMG_MALFUNC   202
-#define ERROR_IMUS_MALFUNC   203
+#define ERROR_LOW_VOLTAGE 201
+#define ERROR_PMMG_MALFUNC 202
+#define ERROR_IMUS_MALFUNC 203
 
 uint8_t stateMessage = 0;
 
@@ -61,7 +69,7 @@ volatile bool processDataFlag = false;  // Flag to trigger process data
 
 volatile bool button_now = 1, button_old = 1, button_is_pushed = 0;
 unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 20;
+const unsigned long debounceDelay = 50;
 const uint16_t battery_threshold = 4000;
 
 #define LONG_PRESS_TIME 1000
@@ -147,16 +155,16 @@ void loop() {
 
   // Step 2: State Handling
   switch (currentState) {
-    case IDLE:              handleIdle(); break;
-    case LOW_VOLTAGE:       handleLowVoltage(); break;
-    case PMMG_ERROR:        handlepmmgError(); break;
-    case IMUS_ERROR:        handleimusError(); break;
-    case STANDBY:           handleStandby(); break;
-    case LEG_ZEROING:       handleLegZeroing(); break;
-    case LEG_ZEROING_END:   handleLegZeroingEnd(); break;
-    case READ_SENSORS:      handleReadSensors(); break;
-    case READ_SENSORS_END:  handleReadSensorsEnd(); break;
-    case MAG_CALIBRATION:   handleMagCalibration(); break;
+    case IDLE: handleIdle(); break;
+    case LOW_VOLTAGE: handleLowVoltage(); break;
+    case PMMG_ERROR: handlepmmgError(); break;
+    case IMUS_ERROR: handleimusError(); break;
+    case STANDBY: handleStandby(); break;
+    case LEG_ZEROING: handleLegZeroing(); break;
+    case LEG_ZEROING_END: handleLegZeroingEnd(); break;
+    case READ_SENSORS: handleReadSensors(); break;
+    case READ_SENSORS_END: handleReadSensorsEnd(); break;
+    case MAG_CALIBRATION: handleMagCalibration(); break;
   }
 
   // Step 3: Sensor Data Processing (conditional on processDataFlag)
@@ -176,17 +184,17 @@ void loop() {
 
     // Handle different outcomes based on sensor data
     if (!pmmgSuccess || PMMG.getPressure() * 0.001 > 150) {
-        nextState = PMMG_ERROR;
-        storeMsg(ERROR_PMMG_MALFUNC);
+      nextState = PMMG_ERROR;
+      storeMsg(ERROR_PMMG_MALFUNC);
     } else if (!imu1Success || !imu2Success || !imu3Success) {
-        nextState = IMUS_ERROR;
-        storeMsg(ERROR_IMUS_MALFUNC);
+      nextState = IMUS_ERROR;
+      storeMsg(ERROR_IMUS_MALFUNC);
     } else if (newData) {
-        myData.d_pmmg = PMMG.getPressure() * 0.001;
-        // if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
-        storeData();
-        sendData_espnow();
-        //}
+      myData.d_pmmg = PMMG.getPressure() * 0.001;
+      // if (currentState == LEG_ZEROING || currentState == READ_SENSORS) {
+      storeData();
+      sendData_espnow();
+      //}
     }
   }
 
@@ -204,9 +212,9 @@ void loop() {
 void handleIdle() {
   esp_timer_stop(mainTimer);
 
-  IMUSerial1.begin(115200, SERIAL_8N1, IMU1_RX, IMU1_TX);
-  IMUSerial2.begin(115200, SERIAL_8N1, IMU2_RX, IMU2_TX);
-  IMUSerial3.begin(115200, SERIAL_8N1, IMU3_RX, IMU3_TX);
+  IMUSerial1.begin(921600, SERIAL_8N1, IMU1_RX, IMU1_TX);
+  IMUSerial2.begin(921600, SERIAL_8N1, IMU2_RX, IMU2_TX);
+  IMUSerial3.begin(921600, SERIAL_8N1, IMU3_RX, IMU3_TX);
   SPI.begin();
   PMMG.init();
 
@@ -221,7 +229,7 @@ void handleLowVoltage() {}
 void handlepmmgError() {
   if (button_is_pushed) {
     nextState = IDLE;
-  }  
+  }
 }
 
 void handleimusError() {
@@ -237,6 +245,7 @@ void handleStandby() {
     buttonPressTime = millis();
   } else if (buttonPressTime > 0 && (millis() - buttonPressTime) > LONG_PRESS_TIME) {
     nextState = MAG_CALIBRATION;
+    magCalibrationState = START_CALIBRATION;
     storeMsg(MSG_STATE_IS_MAG_CAL);
     buttonPressTime = 0;
   } else if (buttonPressTime > 0 && (millis() - buttonPressTime) < LONG_PRESS_TIME) {
@@ -296,42 +305,101 @@ void handleReadSensorsEnd() {
   }
 }
 
+
+// void handleMagCalibration() {
+//   IMUSerial1.println("<cmf>");
+//   IMUSerial2.println("<cmf>");
+//   IMUSerial3.println("<cmf>");
+
+//   while (!button_check()) { delay(10); }
+
+//   bool magcal_allok = true;
+
+//   IMUSerial1.println(">");
+//   magcal_allok &= waitForCalibrationResponse(IMUSerial1);
+//   IMUSerial2.println(">");
+//   magcal_allok &= waitForCalibrationResponse(IMUSerial2);
+//   IMUSerial3.println(">");
+//   magcal_allok &= waitForCalibrationResponse(IMUSerial3);
+
+//   if (magcal_allok) {
+//     nextState = STANDBY;
+//     storeMsg(MSG_STATE_IS_STANDBY);
+//   } else {
+//     nextState = IMUS_ERROR;
+//     storeMsg(ERROR_IMUS_MALFUNC);
+//   }
+// }
+
 void handleMagCalibration() {
-  IMUSerial1.println("<cmf>");
-  IMUSerial2.println("<cmf>");
-  IMUSerial3.println("<cmf>");
+  switch (magCalibrationState) {
+    case START_CALIBRATION:
+      IMUSerial1.println("<cmf>");
+      IMUSerial2.println("<cmf>");
+      IMUSerial3.println("<cmf>");
+      magCalibrationState = WAIT_FOR_BUTTON_PRESS;
+      break;
 
-  while (!button_check()) { delay(1); }
+    case WAIT_FOR_BUTTON_PRESS:
+      if (button_check()) {
+        magCalibrationState = SEND_CALIBRATION_COMMANDS;
+      }
+      break;
 
-  bool magcal_allok = true;
-
-  IMUSerial1.println(">");
-  magcal_allok &= waitForCalibrationResponse(IMUSerial1);
-  IMUSerial2.println(">");
-  magcal_allok &= waitForCalibrationResponse(IMUSerial2);
-  IMUSerial3.println(">");
-  magcal_allok &= waitForCalibrationResponse(IMUSerial3);
-
-  if (magcal_allok) {
-    nextState = STANDBY;
-    storeMsg(MSG_STATE_IS_STANDBY);
-  } else {
-    nextState = IMUS_ERROR;
-    storeMsg(ERROR_IMUS_MALFUNC);
+    case SEND_CALIBRATION_COMMANDS:
+      bool magcal_allok = true;
+      IMUSerial1.println(">");
+      magcal_allok &= waitForCalibrationResponse(IMUSerial1);
+      IMUSerial2.println(">");
+      magcal_allok &= waitForCalibrationResponse(IMUSerial2);
+      IMUSerial3.println(">");
+      magcal_allok &= waitForCalibrationResponse(IMUSerial3);
+      if (magcal_allok) {
+        nextState = STANDBY;
+        storeMsg(MSG_STATE_IS_STANDBY);
+      } else {
+        nextState = IMUS_ERROR;
+        storeMsg(ERROR_IMUS_MALFUNC);
+      }
+      break;
   }
 }
 
+// bool waitForCalibrationResponse(HardwareSerial& serial) {
+//   unsigned long timeout = millis() + 1000;
+//   while (millis() < timeout) {
+//     if (serial.available()) {
+//       String response = serial.readStringUntil('\n');
+//       if (response == "<ok>") {
+//         return true;
+//       }
+//     }
+//   }
+//   return false;
+// }
+
 bool waitForCalibrationResponse(HardwareSerial& serial) {
-  unsigned long timeout = millis() + 3000;
-  while (millis() < timeout) {
-    if (serial.available()) {
-      String response = serial.readStringUntil('\n');
-      if (response == "<ok>") {
+  unsigned long startTime = millis();
+  unsigned long timeout = 1000; // 타임아웃 시간 설정 (1초)
+  String response = "";
+
+  while (millis() - startTime < timeout) {
+    while (serial.available()) {
+      char c = serial.read();
+      response += c;
+
+      // 버퍼 내에서 <ok> 문자열 검색
+      if (response.indexOf("<ok>") != -1) {
         return true;
+      }
+
+      // 버퍼의 크기를 제한하여 메모리 사용을 최적화
+      if (response.length() > 40) {
+        response = response.substring(response.length() - 20); // 최근 20글자만 유지
       }
     }
   }
-  return false;
+  return false; // 타임아웃 시 false 반환
 }
 
 // ################################################################# //

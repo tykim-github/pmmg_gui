@@ -5,6 +5,7 @@
 *.spec
 *.ico
 *.csv
+*.mp3
 
 # Ignore PyInstaller build directories.
 /build/
