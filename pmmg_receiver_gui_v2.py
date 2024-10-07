@@ -17,9 +17,11 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import serial.tools.list_ports
 from numpy.linalg import norm
 import csv
+from playsound import playsound
+import threading
 
 # to make this exe
-# pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." --add-data="your_audio_file.mp3;." --strip pmmg_receiver_gui_v2.py
+# pyinstaller --onefile --noconsole --strip --icon=legmus.ico --add-data="audio_files;audio_files" pmmg_receiver_gui_v2.py
 
 PROGRAM_VERSION = "1.05.1"
 # 1.01   Initial release
@@ -180,12 +182,15 @@ class SerialReader(QThread):
                     if state != "0":
                         self.state_changed.emit(state)
                     if state == "102":
+                        play_audio('audio_init_start.mp3')
                         self.processor.data_buffer = []  # Reset buffer
                         self.collecting = True
                     elif state == "103" and self.collecting:
+                        play_audio('audio_init_done.mp3')
                         self.processor.calculate_initial_state()
                         self.collecting = False
                     elif state == "104":
+                        play_audio('audio_record_start.mp3')
                         self.processor.data_buffer = []  # Reset buffer
                         header_data = {
                             'q_ti': self.processor.q_ti,
@@ -198,6 +203,7 @@ class SerialReader(QThread):
                         self.file_handler.open_new_file(header_data)
                         self.collecting = True
                     elif state == "105" and self.collecting:
+                        play_audio('audio_record_done.mp3')
                         data = np.array([list(map(float, x.split(','))) for x in self.processor.data_buffer])
                         Time, Quaternions, self.processor.Pressure, knee_angle, ankle_angle = self.processor.process_data(data)
                         self.data_processed.emit(Time, Quaternions, self.processor.Pressure, knee_angle, ankle_angle)
@@ -257,7 +263,11 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     
     return os.path.join(base_path, relative_path)
-
+    
+def play_audio(file_name):
+    """비동기적으로 폴더 안에 있는 음성 파일 재생"""
+    audio_file = resource_path(os.path.join('files', file_name))
+    threading.Thread(target=playsound, args=(audio_file,)).start()
 
 class Quaternion:
     @staticmethod
@@ -352,10 +362,11 @@ class SerialDataSaver(QWidget):
 
             # Add image between status label and input fields
             self.image_label = QLabel(self)
-            if hasattr(sys, '_MEIPASS'):
-                image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
-            else:
-                image_path = "joint_angle_definition.png"
+            image_path = resource_path(os.path.join('files', "joint_angle_definition.png"))
+            # if hasattr(sys, '_MEIPASS'):
+            #     image_path = os.path.join(sys._MEIPASS, "joint_angle_definition.png")
+            # else:
+            #     image_path = "joint_angle_definition.png"
 
             pixmap = QPixmap(image_path)
             max_image_width = int(screen_width * 0.3)

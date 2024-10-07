@@ -15,44 +15,18 @@ typedef struct struct_message {
 } struct_message;
 
 struct_message myData;
+volatile bool newDataReceived = false;
+struct_message receivedData;
 
 const float scaleFactor = 1000.0;
 
 ESP32Time rtc(3600);
 
 void onDataReceiver(const esp_now_recv_info *recvInfo, const uint8_t *incomingData, int len) {
-  // Your existing code to handle the incoming data remains unchanged
-  memcpy(&myData, incomingData, sizeof(myData));
-
-  // Convert the received int16_t values back to float
-  float imu1[4], imu2[4], imu3[4];
-
-  for (int i = 0; i < 4; i++) {
-    imu1[i] = myData.d_imu1[i] / scaleFactor;
-    imu2[i] = myData.d_imu2[i] / scaleFactor;
-    imu3[i] = myData.d_imu3[i] / scaleFactor;
-  }
-
-  unsigned long t = myData.time;  // Time in milliseconds since the board was last reset
-
-  // Printing the received data to the Serial monitor
-  Serial.print(myData.msg);
-  Serial.print(",");
-  Serial.print(t);
-  Serial.print(",");
-  for(int i = 0; i < 4; i++) {
-    Serial.print(imu1[i]);
-    Serial.print(",");
-  }
-  for(int i = 0; i < 4; i++) {
-    Serial.print(imu2[i]);
-    Serial.print(",");
-  }
-  for(int i = 0; i < 4; i++) {
-    Serial.print(imu3[i]);
-    Serial.print(",");
-  }
-  Serial.println(myData.d_pmmg);  // PMMG sensor data
+  // Copy the received data into the global buffer
+  memcpy(&receivedData, incomingData, sizeof(receivedData));
+  // Set the flag to indicate new data has been received
+  newDataReceived = true;
 }
 
 void setup() {
@@ -70,7 +44,50 @@ void setup() {
   esp_now_register_recv_cb(onDataReceiver);
 }
 
-
 void loop() {
-  // Keep the loop empty if no periodic tasks are needed.
+  if (newDataReceived) {
+    // Reset the flag
+    newDataReceived = false;
+
+    // Convert the received int16_t values back to float
+    float imu1[4], imu2[4], imu3[4];
+
+    for (int i = 0; i < 4; i++) {
+      imu1[i] = receivedData.d_imu1[i] / scaleFactor;
+      imu2[i] = receivedData.d_imu2[i] / scaleFactor;
+      imu3[i] = receivedData.d_imu3[i] / scaleFactor;
+    }
+
+    unsigned long t = receivedData.time;
+
+    // Printing the received data to the Serial monitor
+    Serial.print(receivedData.msg);
+    Serial.print(",");
+    Serial.print(t);
+    Serial.print(",");
+
+    // Print IMU1 data with 3 decimal places
+    for(int i = 0; i < 4; i++) {
+      Serial.print(imu1[i], 3);
+      Serial.print(",");
+    }
+
+    // Print IMU2 data with 3 decimal places
+    for(int i = 0; i < 4; i++) {
+      Serial.print(imu2[i], 3);
+      Serial.print(",");
+    }
+
+    // Print IMU3 data with 3 decimal places
+    for(int i = 0; i < 4; i++) {
+      Serial.print(imu3[i], 3);
+      Serial.print(",");
+    }
+
+    // Print PMMG sensor data with 3 decimal places
+    Serial.println(receivedData.d_pmmg, 3);
+  }
+
+  // Add a small delay to prevent loop from hogging CPU
+  delay(1);
 }
