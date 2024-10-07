@@ -19,7 +19,7 @@ from numpy.linalg import norm
 import csv
 
 # to make this exe
-# pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." pmmg_receiver_gui_v2.py
+# pyinstaller --onefile --noconsole --icon=legmus.ico --add-data="joint_angle_definition.png;." --add-data="your_audio_file.mp3;." --strip pmmg_receiver_gui_v2.py
 
 PROGRAM_VERSION = "1.05.1"
 # 1.01   Initial release
@@ -31,8 +31,6 @@ PROGRAM_VERSION = "1.05.1"
 # 1.04.2 Reduce size, and csv load will now also plot the flags
 # 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
 # 1.05.1 밴드 위/아래의 종아리 둘레를 모두 입력하도록 함
-
-# TODO (PHYSICAL) : Manufacture short band, like 3~4 and send him
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
@@ -249,6 +247,17 @@ def lowpass_filter(data, cutoff_freq, fs, order=2):
                             - a[1] * filtered_data[i - 1] - a[2] * filtered_data[i - 2])
 
     return filtered_data
+
+
+def resource_path(relative_path):
+    """ PyInstaller로 빌드된 파일 내에서 리소스 파일 경로를 찾는 함수 """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+
 
 class Quaternion:
     @staticmethod
