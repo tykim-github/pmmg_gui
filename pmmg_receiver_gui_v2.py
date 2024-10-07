@@ -23,7 +23,7 @@ import threading
 # to make this exe
 # pyinstaller --onefile --noconsole --strip --icon=legmus.ico --add-data="audio_files;audio_files" pmmg_receiver_gui_v2.py
 
-PROGRAM_VERSION = "1.05.1"
+PROGRAM_VERSION = "1.06.1"
 # 1.01   Initial release
 # 1.02   After 2 child patients
 # 1.02.2 Minor bug change
@@ -33,6 +33,7 @@ PROGRAM_VERSION = "1.05.1"
 # 1.04.2 Reduce size, and csv load will now also plot the flags
 # 1.04.3 "LOAD DATA" 버튼에서 "All files (*)" 옵션이 가장 먼저 표기되도록 변환
 # 1.05.1 밴드 위/아래의 종아리 둘레를 모두 입력하도록 함
+# 1.06.1 Audio added for 102, 103, 104, 105 state
 
 class DataProcessor:
     def __init__(self, initial_knee_angle=None, initial_ankle_angle=None):
